@@ -135,7 +135,8 @@ def webhook():
         return jsonify({"status": "ok", "chave": chave}), 200
 
     except Exception as e:
-        return jsonify({"status": "erro", "detalhe": str(e)}), 500
+        print(f"ERRO no webhook: {e}")
+        return jsonify({"status": "erro", "detalhe": str(e)}), 200
 
 @app.route("/", methods=["GET"])
 def home():
