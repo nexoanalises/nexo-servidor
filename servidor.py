@@ -19,6 +19,7 @@ GMAIL_SENHA    = os.environ.get("GMAIL_SENHA")  # senha de app, definida nas var
 SPREADSHEET_ID = "1Z-uW3AVXComh-3DGvdRiAASQL567oOf1DThJwNXt3Sc"
 SHEET_NAME     = "Página1"
 WHATSAPP       = "(21) 92006-9321"
+DOWNLOAD_COMPLETO = "https://drive.google.com/file/d/1UNAF_QAu1otB88bGLmjhWhxnTyBd5IrH/view?usp=sharing"
 
 # Credenciais Google — lidas do ambiente (Railway/Render) ou arquivo local
 CREDENTIALS_JSON = os.environ.get("GOOGLE_CREDENTIALS_JSON")
@@ -83,11 +84,15 @@ Obrigado pela sua compra. Sua chave de ativação do NEXO está pronta:
 📅 Validade: {expiracao_texto}
 ━━━━━━━━━━━━━━━━━━━━━━━━
 
-Como ativar:
-1. Abra o NEXO no seu computador
-2. Na tela de ativação, digite a chave acima
-3. Clique em "Ativar"
-4. Pronto! O NEXO estará liberado.
+📥 Baixe o NEXO aqui: {DOWNLOAD_COMPLETO}
+
+Como instalar e ativar:
+1. Baixe e extraia o arquivo .zip
+2. Execute o "Instalar_Nexo_Completo"
+3. Abra o NEXO pelo atalho criado na área de trabalho
+4. Na tela de ativação, digite a chave acima
+5. Clique em "Ativar"
+6. Pronto! O NEXO estará liberado.
 
 Qualquer dúvida, fale comigo pelo WhatsApp: {WHATSAPP}
 
