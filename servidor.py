@@ -14,8 +14,8 @@ import json
 app = Flask(__name__)
 
 # ─── CONFIGURAÇÃO ───────────────────────────────────────────────────────────────
-GMAIL_EMAIL    = "nexo.analises@gmail.com"
-GMAIL_SENHA    = "qxdcrrzunzlrvzzn"  # senha de app sem espaços
+GMAIL_EMAIL    = os.environ.get("GMAIL_EMAIL", "nexo.analises@gmail.com")
+GMAIL_SENHA    = os.environ.get("GMAIL_SENHA")  # senha de app, definida nas variáveis de ambiente
 SPREADSHEET_ID = "1Z-uW3AVXComh-3DGvdRiAASQL567oOf1DThJwNXt3Sc"
 SHEET_NAME     = "Página1"
 WHATSAPP       = "(21) 92006-9321"
