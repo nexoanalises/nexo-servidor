@@ -8,6 +8,7 @@ from reportlab.lib.units import cm
 from reportlab.lib import colors
 import os
 import sys
+from xml.sax.saxutils import escape
 
 # ─── CONFIGURAÇÃO ───────────────────────────────────────────────────────────────
 _GROQ_KEY = os.environ.get("GROQ_API_KEY", "")
@@ -43,19 +44,47 @@ def analisar(dados, segmento):
         messages=[{
             "role": "user",
             "content": (
-                f"Você é um consultor sênior especialista em {segmento} com 20 anos de experiência no mercado brasileiro.\n\n"
-                f"Com base nos dados abaixo, entregue um parecer executivo completo:\n\n"
-                f"1) DIAGNÓSTICO EXECUTIVO — resumo em 3 linhas no tom de um CEO\n"
-                f"2) PONTO CRÍTICO POSITIVO — principal resultado positivo e seu impacto\n"
-                f"3) RISCO PRINCIPAL — maior risco e consequência se não tratado\n"
-                f"4) PLANO DE AÇÃO — 3 ações priorizadas por urgência e impacto, com prazo sugerido. "
-                f"Para cada ação, além de dizer O QUE fazer, explique COMO fazer na prática: "
-                f"passos concretos, táticas específicas e exemplos aplicáveis ao segmento "
-                f"(ex: se a ação envolve marketing digital, sugira canais, tipo de campanha e se vale contratar um especialista; "
-                f"se envolve estoque, sugira métodos de controle e renegociação com fornecedores; "
-                f"se envolve equipe, sugira ações concretas de retenção e treinamento)\n"
-                f"5) INDICADOR DE SAÚDE DO NEGÓCIO — nota de 0 a 10 com justificativa\n\n"
-                f"Use linguagem executiva, direta e profissional. Responda em português do Brasil.\n\n"
+                f"Você é o NEXO, um sistema de apoio à decisão para donos de pequenos e médios negócios do segmento {segmento} no Brasil.\n\n"
+                f"OBJETIVO: ajudar o proprietário a tomar decisões práticas, realistas e executáveis dentro da realidade atual do negócio dele. "
+                f"NÃO é diagnosticar, impressionar com análises ou agir como consultoria tradicional. "
+                f"O dono deve identificar suas próximas prioridades em menos de 3 minutos de leitura.\n\n"
+                f"PRINCÍPIOS OBRIGATÓRIOS:\n"
+                f"- Decisão acima de análise: priorize ações, não explicações longas.\n"
+                f"- Realidade acima da solução ideal: respeite o porte e o orçamento informado.\n"
+                f"- Execução acima de teoria: toda recomendação precisa ser executável pelo próprio dono.\n"
+                f"- O cliente deve agir sozinho: priorize ferramentas gratuitas, de baixo custo e métodos DIY.\n"
+                f"- NUNCA recomende como ação principal: contratar consultoria estratégica, agência especializada, equipe dedicada "
+                f"ou implementar sistemas complexos — exceto se o orçamento informado claramente comportar.\n"
+                f"- NUNCA direcione o cliente para buscar ajuda estratégica externa como solução principal. O NEXO É o consultor dele.\n\n"
+                f"LINGUAGEM: direta e imperativa. Use 'Faça', 'Implemente', 'Corrija', 'Monitore', 'Priorize'. "
+                f"EVITE 'É importante considerar...', 'Recomenda-se avaliar...', 'Pode ser interessante...'. "
+                f"Português do Brasil, sem jargão de IA ou de consultoria genérica.\n\n"
+                f"ESTRUTURA OBRIGATÓRIA DO RELATÓRIO (use exatamente estes títulos numerados):\n\n"
+                f"1) RESUMO EXECUTIVO\n"
+                f"Resumo direto da situação atual. Máximo 5 linhas.\n\n"
+                f"2) OPORTUNIDADE MAIS IMPORTANTE\n"
+                f"Aponte o principal fator positivo identificado. Explique por que ele deve ser preservado ou ampliado.\n\n"
+                f"3) ATENÇÃO IMEDIATA\n"
+                f"Aponte o problema ou risco que merece atenção prioritária. Explique o impacto concreto de não agir.\n\n"
+                f"4) O QUE FAZER AGORA\n"
+                f"Liste de 3 a 5 ações priorizadas. Para CADA ação informe, em formato de tópicos curtos:\n"
+                f"- Prioridade: (Alta / Média / Baixa)\n"
+                f"- Impacto esperado: (descrição objetiva do ganho)\n"
+                f"- Custo estimado: (ex.: 'Custo zero', 'até R$ 100', 'R$ 200-500')\n"
+                f"- Tempo de implementação: (ex.: '1 dia', '1 semana', '15 dias')\n"
+                f"- Tempo até perceber resultado: (ex.: '7 dias', '30 dias', '60-90 dias')\n\n"
+                f"5) COMO EXECUTAR\n"
+                f"Para CADA ação listada em 'O QUE FAZER AGORA', detalhe:\n"
+                f"- O que fazer\n"
+                f"- Como fazer (passo a passo simplificado e específico para o segmento)\n"
+                f"- Ferramentas recomendadas (priorize gratuitas ou de baixo custo — ex.: WhatsApp Business, Google Meu Negócio, Canva grátis, Instagram orgânico, planilha Google)\n\n"
+                f"6) JUSTIFICATIVA\n"
+                f"Só agora apresente a análise que sustenta as decisões acima. Conecte cada recomendação a um dado concreto do negócio. Aumente a confiança do dono nas escolhas.\n\n"
+                f"REGRAS DE PRIORIZAÇÃO — cada ação deve responder: Vale a pena? Quanto esforço exige? Quanto custa? Quanto impacto gera? Pode ser executada pelo próprio dono? "
+                f"Se não responder claramente essas perguntas, NÃO inclua a ação.\n\n"
+                f"RESTRIÇÃO DE ORÇAMENTO: respeite estritamente o campo 'Orçamento disponível para melhorias' nos dados. "
+                f"Se o orçamento for baixo, nulo ou não informado, recomende apenas ações de custo zero ou muito baixo "
+                f"(ajustes de processo, ações orgânicas, renegociação, organização interna, ferramentas gratuitas).\n\n"
                 f"DADOS DO NEGÓCIO:\n{dados}"
             )
         }]
@@ -85,15 +114,14 @@ def salvar_pdf(resultado, segmento, nome_negocio):
     conteudo.append(Paragraph("NEXO", estilo_titulo))
     conteudo.append(Paragraph("Análise inteligente para o seu negócio", estilo_slogan))
     conteudo.append(Spacer(1, 0.3*cm))
-    conteudo.append(Paragraph(f"Negócio: {nome_negocio} | Segmento: {segmento}", estilos["Heading2"]))
+    conteudo.append(Paragraph(f"Negócio: {escape(nome_negocio)} | Segmento: {escape(segmento)}", estilos["Heading2"]))
     conteudo.append(Spacer(1, 0.3*cm))
     for linha in resultado.split("\n"):
         if linha.strip() == "":
             conteudo.append(Spacer(1, 0.3*cm))
         else:
-            conteudo.append(Paragraph(linha.replace("**", ""), estilos["Normal"]))
+            conteudo.append(Paragraph(escape(linha.replace("**", "")), estilos["Normal"]))
     conteudo.append(Spacer(1, 1*cm))
-    conteudo.append(Paragraph("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━", estilo_rodape))
     conteudo.append(Paragraph("NEXO — Análise inteligente para o seu negócio", estilo_rodape))
     conteudo.append(Paragraph(f"WhatsApp: {WHATSAPP}  |  nexo.analises@gmail.com", estilo_rodape))
     doc.build(conteudo)
@@ -203,6 +231,8 @@ def carregar_campos(segmento=None):
                 dica="Some todos os custos do período: salários, aluguel, energia, marketing, materiais, etc.")
     criar_campo(frame_campos, "Lucro líquido (R$)", "lucro",
                 dica="Faturamento menos todos os custos. Se teve prejuízo, informe com sinal negativo: -R$ 2.000")
+    criar_campo(frame_campos, "Orçamento disponível para melhorias", "orcamento_melhorias", tipo="text",
+                dica="Quanto você tem disponível para investir em melhorias agora? Ex: 'R$ 500', 'até R$ 2.000', 'não tenho no momento'. Essa informação é essencial para sugerirmos ações compatíveis com sua realidade.")
     criar_campo(frame_campos, "Número de funcionários", "funcionarios",
                 dica="Total de colaboradores ativos no período, incluindo sócios que trabalham no negócio.")
     criar_campo(frame_campos, "Capacidade operacional ocupada (%)", "capacidade",
