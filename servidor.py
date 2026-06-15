@@ -226,7 +226,7 @@ def analisar():
 
     except Exception as e:
         print(f"ERRO no /analisar: {e}")
-        return jsonify({"status": "erro", "motivo": "Falha ao gerar a análise."}), 200
+        return jsonify({"status": "erro", "motivo": f"Falha ao gerar a análise: {e}"}), 200
 
 # ─── WEBHOOK ────────────────────────────────────────────────────────────────────
 
