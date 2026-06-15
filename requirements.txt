@@ -3,3 +3,5 @@ gunicorn
 gspread
 google-auth
 python-dateutil
+groq
+
