@@ -163,20 +163,20 @@ def mostrar_boas_vindas(callback_iniciar):
              font=("Arial", 12), bg="#1a0033", fg="#dddddd", justify="center").pack(pady=(0, 20))
 
     # Caixa de aviso (borda coral)
-    frame_aviso = tk.Frame(splash, bg="#1a0033", highlightbackground="#FF6B6B",
+    frame_aviso = tk.Frame(splash, bg="#1a0033", highlightbackground="#ff751f",
                            highlightthickness=2, padx=16, pady=12)
     frame_aviso.pack(padx=30, fill="x")
     tk.Label(frame_aviso,
              text="📈  Quanto mais precisos forem os dados informados,\n"
                   "mais úteis e direcionadas serão as recomendações.",
-             font=("Arial", 11), bg="#1a0033", fg="#FF6B6B", justify="center").pack()
+             font=("Arial", 11), bg="#1a0033", fg="#ff751f", justify="center").pack()
 
     # Checkbox de aceite
     var_aceite = tk.BooleanVar(value=False)
 
     def ao_marcar():
         if var_aceite.get():
-            btn_iniciar.config(state="normal", bg="#FF6B6B", fg="white", cursor="hand2")
+            btn_iniciar.config(state="normal", bg="#ff751f", fg="white", cursor="hand2")
         else:
             btn_iniciar.config(state="disabled", bg="#4a3a3a", fg="#888888", cursor="")
 
