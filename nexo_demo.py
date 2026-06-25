@@ -10,6 +10,7 @@ import os
 import sys
 import re
 import json
+import webbrowser
 from xml.sax.saxutils import escape
 from datetime import datetime, date
 
@@ -26,6 +27,7 @@ EMOJI_RE = re.compile(
 # ─── CONFIGURAÇÃO ───────────────────────────────────────────────────────────────
 SERVIDOR_URL = "https://nexo-servidor-production.up.railway.app"
 WHATSAPP = "(21) 92006-9321"
+LINK_VENDAS = "https://nexo-analise.netlify.app"
 DIAS_TRIAL = 7
 
 if getattr(sys, 'frozen', False):
@@ -63,17 +65,54 @@ def status_trial():
 
 iniciado, trial_ativo, dias_restantes = status_trial()
 
-if iniciado and not trial_ativo:
-    root_err = tk.Tk()
-    root_err.withdraw()
-    messagebox.showinfo(
-        "Período gratuito encerrado",
-        f"Seu período de teste gratuito de {DIAS_TRIAL} dias chegou ao fim.\n\n"
-        f"Para continuar usando o NEXO Análise, adquira sua licença:\n"
-        f"WhatsApp: {WHATSAPP}\nnexo.analises@gmail.com"
-    )
-    root_err.destroy()
+def mostrar_trial_encerrado():
+    janela_fim = tk.Tk()
+    janela_fim.title("NEXO Análise")
+    janela_fim.geometry("520x440")
+    janela_fim.resizable(False, False)
+    janela_fim.configure(bg="#1a0033")
+    janela_fim.eval('tk::PlaceWindow . center')
+
+    tk.Label(janela_fim, text="Seu período gratuito chegou ao fim",
+             font=("Arial", 18, "bold"), bg="#1a0033", fg="white",
+             wraplength=460, justify="center").pack(pady=(36, 8))
+
+    tk.Label(janela_fim,
+             text=f"Esperamos que os seus {DIAS_TRIAL} dias de teste\n"
+                  "tenham mostrado o valor do NEXO Análise.",
+             font=("Arial", 12), bg="#1a0033", fg="#dddddd",
+             justify="center").pack(pady=(0, 24))
+
+    # Caixa de destaque (coral)
+    frame_dest = tk.Frame(janela_fim, bg="#1a0033", highlightbackground="#ff751f",
+                          highlightthickness=2, padx=20, pady=16)
+    frame_dest.pack(padx=30, fill="x")
+    tk.Label(frame_dest,
+             text="Continue com análises ILIMITADAS\npara o seu negócio crescer.",
+             font=("Arial", 12, "bold"), bg="#1a0033", fg="#ff751f",
+             justify="center").pack()
+
+    # Botão principal → página de vendas
+    def abrir_vendas():
+        webbrowser.open(LINK_VENDAS)
+
+    tk.Button(janela_fim, text="Ver planos e continuar  →",
+              font=("Arial", 14, "bold"), bg="#ff751f", fg="white",
+              activebackground="#e06820", activeforeground="white",
+              relief="flat", cursor="hand2", padx=20, pady=12,
+              command=abrir_vendas).pack(pady=(28, 12))
+
+    tk.Label(janela_fim,
+             text=f"Dúvidas? WhatsApp {WHATSAPP}  •  nexo.analises@gmail.com",
+             font=("Arial", 9), bg="#1a0033", fg="#888888").pack(pady=(4, 0))
+
+    janela_fim.protocol("WM_DELETE_WINDOW", lambda: (janela_fim.destroy(), sys.exit()))
+    janela_fim.mainloop()
     sys.exit()
+
+
+if iniciado and not trial_ativo:
+    mostrar_trial_encerrado()
 
 # ─── APP PRINCIPAL ───────────────────────────────────────────────────────────────
 
