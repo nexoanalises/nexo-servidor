@@ -233,7 +233,7 @@ def analisar():
 @app.route("/webhook", methods=["POST"])
 def webhook():
     try:
-        dados = request.json or request.form.to_dict()
+        dados = request.get_json(silent=True) or request.form.to_dict()
 
         # Campos que a Eduzz envia
         nome_cliente  = dados.get("cus_name", "Cliente")
