@@ -236,10 +236,10 @@ def webhook():
         dados = request.json or request.form.to_dict()
 
         # Campos que a Eduzz envia
-        nome_cliente  = dados.get("client_name", "Cliente")
-        email_cliente = dados.get("client_email", "")
-        valor         = str(int(float(dados.get("transaction_value", "0"))))
-        status        = dados.get("transaction_status", "")
+        nome_cliente  = dados.get("cus_name", "Cliente")
+        email_cliente = dados.get("cus_email", "")
+        valor         = str(int(float(dados.get("trans_value", "0"))))
+        status        = dados.get("trans_status", "")
 
         # Só processa vendas aprovadas
         if status not in ("paid", "approved", "3", "3.0"):
