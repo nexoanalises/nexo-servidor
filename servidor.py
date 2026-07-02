@@ -240,6 +240,7 @@ def webhook():
         email_cliente = dados.get("cus_email", "")
         valor         = str(int(float(dados.get("trans_value", "0"))))
         status        = dados.get("trans_status", "")
+        print(f"DEBUG webhook recebido: dados={dados}")
 
         # Só processa vendas aprovadas
         if status not in ("paid", "approved", "3", "3.0"):
