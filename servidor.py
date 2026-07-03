@@ -1,22 +1,20 @@
 from flask import Flask, request, jsonify
 import gspread
 from google.oauth2.service_account import Credentials
-import smtplib
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
 import random
 import string
 from datetime import datetime
 from dateutil.relativedelta import relativedelta
 import os
 import json
+import requests
 from groq import Groq
 
 app = Flask(__name__)
 
 # ─── CONFIGURAÇÃO ───────────────────────────────────────────────────────────────
 GMAIL_EMAIL    = os.environ.get("GMAIL_EMAIL", "nexo.analises@gmail.com")
-GMAIL_SENHA    = os.environ.get("GMAIL_SENHA")  # senha de app, definida nas variáveis de ambiente
+BREVO_API_KEY  = os.environ.get("BREVO_API_KEY")
 SPREADSHEET_ID = "1Z-uW3AVXComh-3DGvdRiAASQL567oOf1DThJwNXt3Sc"
 SHEET_NAME     = "Página1"
 WHATSAPP       = "(21) 92006-9321"
@@ -74,11 +72,6 @@ def registrar_chave(chave, plano_nome, expiracao, cliente, email_cliente):
     ])
 
 def enviar_email(email_cliente, nome_cliente, chave, plano_nome, expiracao):
-    msg = MIMEMultipart("alternative")
-    msg["Subject"] = "✅ Sua chave de ativação do NEXO Análise chegou!"
-    msg["From"]    = GMAIL_EMAIL
-    msg["To"]      = email_cliente
-
     expiracao_texto = "Vitalícia" if expiracao == "definitivo" else f"Válida até {expiracao}"
 
     corpo = f"""
@@ -108,11 +101,23 @@ Boas análises!
 Equipe NEXO
 nexo.analises@gmail.com
 """
-    msg.attach(MIMEText(corpo, "plain", "utf-8"))
 
-    with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
-        server.login(GMAIL_EMAIL, GMAIL_SENHA)
-        server.sendmail(GMAIL_EMAIL, email_cliente, msg.as_string())
+    resposta = requests.post(
+        "https://api.brevo.com/v3/smtp/email",
+        headers={
+            "accept": "application/json",
+            "api-key": BREVO_API_KEY,
+            "content-type": "application/json",
+        },
+        json={
+            "sender": {"name": "Equipe NEXO", "email": GMAIL_EMAIL},
+            "to": [{"email": email_cliente, "name": nome_cliente}],
+            "subject": "✅ Sua chave de ativação do NEXO Análise chegou!",
+            "textContent": corpo,
+        },
+        timeout=15,
+    )
+    resposta.raise_for_status()
 
 # ─── ANÁLISE (IA) ─────────────────────────────────────────────────────────────────
 
