@@ -69,7 +69,7 @@ def registrar_chave(chave, plano_nome, expiracao, cliente, email_cliente):
         cliente,
         datetime.now().strftime("%d/%m/%Y %H:%M"),
         email_cliente
-    ])
+    ], table_range="A1:G1")
 
 def enviar_email(email_cliente, nome_cliente, chave, plano_nome, expiracao):
     expiracao_texto = "Vitalícia" if expiracao == "definitivo" else f"Válida até {expiracao}"
