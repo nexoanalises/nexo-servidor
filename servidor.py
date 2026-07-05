@@ -272,6 +272,71 @@ def webhook():
         print(f"ERRO no webhook: {e}")
         return jsonify({"status": "erro", "detalhe": str(e)}), 200
 
+# ─── OPT-IN DA LANDING (ponte → Systeme.io) ─────────────────────────────────────
+# A API do Systeme.io só aceita JSON e não libera CORS pra outros domínios,
+# então a landing envia pra cá e o servidor repassa (servidor→servidor não tem CORS).
+
+SYSTEME_OPTIN_URL     = "https://ricardodcramos18.systeme.io/api/monolith-opt-in/open/global/opt-in"
+SYSTEME_OPTIN_FORM_ID = "30f8295e-3e9d-4809-909a-141c0e23db0d"  # form "Página de captura"
+OPTIN_ORIGENS = {
+    "https://nexosoft.com.br",
+    "https://www.nexosoft.com.br",
+    "https://nexo-analise.netlify.app",
+}
+# A CloudFront do Systeme.io devolve 404 pra user-agents que não parecem navegador
+OPTIN_UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+            "(KHTML, like Gecko) Chrome/126.0 Safari/537.36")
+
+def _optin_cors(resp):
+    origem = request.headers.get("Origin", "")
+    if origem in OPTIN_ORIGENS:
+        resp.headers["Access-Control-Allow-Origin"] = origem
+        resp.headers["Access-Control-Allow-Methods"] = "POST, OPTIONS"
+        resp.headers["Access-Control-Allow-Headers"] = "Content-Type"
+    return resp
+
+@app.route("/optin", methods=["POST", "OPTIONS"])
+def optin():
+    if request.method == "OPTIONS":
+        return _optin_cors(app.make_response(("", 204)))
+    try:
+        body  = request.get_json(silent=True) or {}
+        email = (body.get("email") or "").strip()
+        # O form do Systeme.io exige first_name; a landing não coleta nome,
+        # então cai em "Visitante" (nenhum e-mail da sequência usa o nome).
+        nome  = (body.get("nome") or "").strip() or "Visitante"
+
+        if "@" not in email or "." not in email.split("@")[-1]:
+            resp = jsonify({"status": "erro", "motivo": "email inválido"})
+            resp.status_code = 400
+            return _optin_cors(resp)
+
+        r = requests.post(
+            SYSTEME_OPTIN_URL,
+            headers={
+                "content-type": "application/json",
+                "accept": "application/json, text/plain, */*",
+                "user-agent": OPTIN_UA,
+            },
+            json={
+                "fields": [
+                    {"slug": "first_name", "value": nome[:80]},
+                    {"slug": "email", "value": email},
+                ],
+                "formId": SYSTEME_OPTIN_FORM_ID,
+                "timezone": (body.get("timezone") or "America/Sao_Paulo")[:64],
+            },
+            timeout=15,
+        )
+        r.raise_for_status()
+        return _optin_cors(jsonify({"status": "ok"}))
+
+    except Exception as e:
+        print(f"ERRO no /optin: {e}")
+        resp = jsonify({"status": "erro", "motivo": "falha no cadastro"})
+        resp.status_code = 502
+        return _optin_cors(resp)
+
 @app.route("/", methods=["GET"])
 def home():
     return "Nexo Servidor ativo.", 200
