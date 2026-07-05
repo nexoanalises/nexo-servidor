@@ -13,7 +13,7 @@ from groq import Groq
 app = Flask(__name__)
 
 # ─── CONFIGURAÇÃO ───────────────────────────────────────────────────────────────
-GMAIL_EMAIL    = os.environ.get("GMAIL_EMAIL", "nexo.analises@gmail.com")
+SENDER_EMAIL   = os.environ.get("SENDER_EMAIL", "contato@nexosoft.com.br")
 BREVO_API_KEY  = os.environ.get("BREVO_API_KEY")
 SPREADSHEET_ID = "1Z-uW3AVXComh-3DGvdRiAASQL567oOf1DThJwNXt3Sc"
 SHEET_NAME     = "Página1"
@@ -99,7 +99,7 @@ Qualquer dúvida, fale comigo pelo WhatsApp: {WHATSAPP}
 
 Boas análises!
 Equipe NEXO
-nexo.analises@gmail.com
+contato@nexosoft.com.br
 """
 
     resposta = requests.post(
@@ -110,7 +110,7 @@ nexo.analises@gmail.com
             "content-type": "application/json",
         },
         json={
-            "sender": {"name": "Equipe NEXO", "email": GMAIL_EMAIL},
+            "sender": {"name": "Equipe NEXO", "email": SENDER_EMAIL},
             "to": [{"email": email_cliente, "name": nome_cliente}],
             "subject": "✅ Sua chave de ativação do NEXO Análise chegou!",
             "textContent": corpo,
