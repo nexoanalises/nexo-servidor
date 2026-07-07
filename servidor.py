@@ -278,6 +278,9 @@ def webhook():
 
 SYSTEME_OPTIN_URL     = "https://ricardodcramos18.systeme.io/api/monolith-opt-in/open/global/opt-in"
 SYSTEME_OPTIN_FORM_ID = "30f8295e-3e9d-4809-909a-141c0e23db0d"  # form "Página de captura"
+# Desde ~07/07/2026 o Systeme.io exige Referer de uma página do próprio funil
+# (sem ele o app devolve 404 genérico, mesmo com formId válido).
+SYSTEME_OPTIN_REFERER = "https://ricardodcramos18.systeme.io/nexo-captura-pdf1"
 OPTIN_ORIGENS = {
     "https://nexosoft.com.br",
     "https://www.nexosoft.com.br",
@@ -317,6 +320,7 @@ def optin():
                 "content-type": "application/json",
                 "accept": "application/json, text/plain, */*",
                 "user-agent": OPTIN_UA,
+                "referer": SYSTEME_OPTIN_REFERER,
             },
             json={
                 "fields": [
