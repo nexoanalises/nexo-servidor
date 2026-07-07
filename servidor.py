@@ -272,23 +272,62 @@ def webhook():
         print(f"ERRO no webhook: {e}")
         return jsonify({"status": "erro", "detalhe": str(e)}), 200
 
-# ─── OPT-IN DA LANDING (ponte → Systeme.io) ─────────────────────────────────────
-# A API do Systeme.io só aceita JSON e não libera CORS pra outros domínios,
-# então a landing envia pra cá e o servidor repassa (servidor→servidor não tem CORS).
+# ─── OPT-IN DA LANDING (ponte → Systeme.io, API oficial) ────────────────────────
+# A landing envia pra cá e o servidor cadastra o lead pela API pública do
+# Systeme.io (api.systeme.io): cria/acha o contato e aplica a tag de lead.
+# O fluxo de e-mails usa o gatilho "Tag adicionada" — nada de form/endpoint
+# não-documentado (o opt-in interno deles quebrou sem aviso em 07/07/2026).
 
-SYSTEME_OPTIN_URL     = "https://ricardodcramos18.systeme.io/api/monolith-opt-in/open/global/opt-in"
-SYSTEME_OPTIN_FORM_ID = "30f8295e-3e9d-4809-909a-141c0e23db0d"  # form "Página de captura"
-# Desde ~07/07/2026 o Systeme.io exige Referer de uma página do próprio funil
-# (sem ele o app devolve 404 genérico, mesmo com formId válido).
-SYSTEME_OPTIN_REFERER = "https://ricardodcramos18.systeme.io/nexo-captura-pdf1"
+SYSTEME_API_URL  = "https://api.systeme.io/api"
+SYSTEME_API_KEY  = os.environ.get("SYSTEME_API_KEY", "")
+SYSTEME_TAG_LEAD = "biblioteca-lead"   # gatilho do fluxo "NEXO — Sequência PDF 1"
+_systeme_tag_id  = None                # cache do id da tag (estável na conta)
+
 OPTIN_ORIGENS = {
     "https://nexosoft.com.br",
     "https://www.nexosoft.com.br",
     "https://nexo-analise.netlify.app",
 }
-# A CloudFront do Systeme.io devolve 404 pra user-agents que não parecem navegador
-OPTIN_UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-            "(KHTML, like Gecko) Chrome/126.0 Safari/537.36")
+
+
+def _systeme_req(metodo, caminho, **kwargs):
+    return requests.request(
+        metodo, SYSTEME_API_URL + caminho,
+        headers={"x-api-key": SYSTEME_API_KEY, "content-type": "application/json"},
+        timeout=15, **kwargs,
+    )
+
+
+def _systeme_tag_lead_id():
+    global _systeme_tag_id
+    if _systeme_tag_id:
+        return _systeme_tag_id
+    r = _systeme_req("GET", "/tags", params={"limit": 100})
+    r.raise_for_status()
+    for tag in r.json().get("items", []):
+        if tag.get("name") == SYSTEME_TAG_LEAD:
+            _systeme_tag_id = tag["id"]
+            return _systeme_tag_id
+    r = _systeme_req("POST", "/tags", json={"name": SYSTEME_TAG_LEAD})
+    r.raise_for_status()
+    _systeme_tag_id = r.json()["id"]
+    return _systeme_tag_id
+
+
+def _systeme_contato_id(email, nome):
+    r = _systeme_req("POST", "/contacts", json={
+        "email": email,
+        "fields": [{"slug": "first_name", "value": nome}],
+    })
+    if r.status_code == 422:
+        # contato já existe → busca o id pelo e-mail
+        r2 = _systeme_req("GET", "/contacts", params={"email": email})
+        r2.raise_for_status()
+        itens = r2.json().get("items", [])
+        if itens:
+            return itens[0]["id"]
+    r.raise_for_status()
+    return r.json()["id"]
 
 def _optin_cors(resp):
     origem = request.headers.get("Origin", "")
@@ -314,29 +353,20 @@ def optin():
             resp.status_code = 400
             return _optin_cors(resp)
 
-        r = requests.post(
-            SYSTEME_OPTIN_URL,
-            headers={
-                "content-type": "application/json",
-                "accept": "application/json, text/plain, */*",
-                "user-agent": OPTIN_UA,
-                "referer": SYSTEME_OPTIN_REFERER,
-            },
-            json={
-                "fields": [
-                    {"slug": "first_name", "value": nome[:80]},
-                    {"slug": "email", "value": email},
-                ],
-                "formId": SYSTEME_OPTIN_FORM_ID,
-                "timezone": (body.get("timezone") or "America/Sao_Paulo")[:64],
-            },
-            timeout=15,
-        )
-        r.raise_for_status()
+        contato_id = _systeme_contato_id(email, nome[:80])
+        r = _systeme_req("POST", f"/contacts/{contato_id}/tags",
+                         json={"tagId": _systeme_tag_lead_id()})
+        # tag repetida no mesmo contato não é erro (re-cadastro do mesmo lead)
+        if r.status_code not in (200, 201, 204, 422):
+            r.raise_for_status()
         return _optin_cors(jsonify({"status": "ok"}))
 
     except Exception as e:
-        print(f"ERRO no /optin: {e}")
+        detalhe = ""
+        resp_upstream = getattr(e, "response", None)
+        if resp_upstream is not None:
+            detalhe = f" [{resp_upstream.status_code}] {resp_upstream.text[:300]}"
+        print(f"ERRO no /optin: {e}{detalhe}")
         resp = jsonify({"status": "erro", "motivo": "falha no cadastro"})
         resp.status_code = 502
         return _optin_cors(resp)
