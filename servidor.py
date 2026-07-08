@@ -31,7 +31,7 @@ groq_client = Groq(api_key=GROQ_API_KEY) if GROQ_API_KEY else None
 APP_TOKEN = os.environ.get("APP_TOKEN", "")
 
 PLANOS = {
-    "97":  ("lancamento",  1,  "months"),
+    "97":  ("lancamento",  0,  "forever"),
     "47":  ("mensal",      1,  "months"),
     "297": ("anual",       12, "months"),
     "697": ("definitivo",  0,  "forever"),
