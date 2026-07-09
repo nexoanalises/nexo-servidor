@@ -19,6 +19,7 @@ SPREADSHEET_ID = "1Z-uW3AVXComh-3DGvdRiAASQL567oOf1DThJwNXt3Sc"
 SHEET_NAME     = "Página1"
 WHATSAPP       = "(21) 92006-9321"
 DOWNLOAD_COMPLETO = "https://drive.google.com/file/d/1UNAF_QAu1otB88bGLmjhWhxnTyBd5IrH/view?usp=sharing"
+FORM_AVALIACAO    = "https://docs.google.com/forms/d/e/1FAIpQLScdGr_TGwC4ith2tyRu1S7NyprrTLZm7cYlRPtOzbx7A92xXw/viewform"
 
 # Credenciais Google — lidas do ambiente (Railway/Render) ou arquivo local
 CREDENTIALS_JSON = os.environ.get("GOOGLE_CREDENTIALS_JSON")
@@ -95,10 +96,14 @@ Como instalar e ativar:
 5. Clique em "Ativar"
 6. Pronto! O NEXO Análise estará liberado.
 
-Qualquer dúvida, fale comigo pelo WhatsApp: {WHATSAPP}
+É normal o Windows mostrar um aviso azul na primeira vez. Ele aparece com programas recém-lançados, até o Windows reconhecê-los — não é vírus nem indica problema. Quando surgir "O Windows protegeu o seu PC", clique em "Mais informações" e depois em "Executar assim mesmo". Pronto, o NEXO abre normalmente.
+
+Qualquer dúvida, é só escrever pra contato@nexosoft.com.br — eu leio e respondo cada mensagem.
+
+Quando você rodar suas primeiras análises, conta pra gente como foi (leva 1 minuto): {FORM_AVALIACAO}
 
 Boas análises!
-Equipe NEXO
+Ricardo — NEXO Análise
 contato@nexosoft.com.br
 """
 
@@ -110,7 +115,7 @@ contato@nexosoft.com.br
             "content-type": "application/json",
         },
         json={
-            "sender": {"name": "Equipe NEXO", "email": SENDER_EMAIL},
+            "sender": {"name": "Ricardo — NEXO Análise", "email": SENDER_EMAIL},
             "to": [{"email": email_cliente, "name": nome_cliente}],
             "subject": "✅ Sua chave de ativação do NEXO Análise chegou!",
             "textContent": corpo,
