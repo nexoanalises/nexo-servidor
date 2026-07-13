@@ -2,6 +2,7 @@ from flask import Flask, request, jsonify
 import gspread
 from google.oauth2.service_account import Credentials
 import random
+import re
 import string
 from datetime import datetime
 from dateutil.relativedelta import relativedelta
@@ -147,6 +148,100 @@ def validar_licenca_chave(chave):
         print(f"ERRO ao validar licença: {e}")
         return False
 
+# ─── MOTOR DE ESTRATÉGIA NEXO (v1) ───────────────────────────────────────────────
+# O LLM não faz conta: os números-pivô (margem, atingimento de meta, variações vs
+# análise anterior) são calculados AQUI, em Python, e entram no prompt como fatos.
+# Campo que não dá pra interpretar com segurança vira "não calculável" — nunca chute.
+# As bandeiras do Radar numérico também nascem de regra, não de opinião do modelo.
+
+def _num_br(texto):
+    """Extrai UM número de texto livre BR ('R$ 38.500', '28%', '40 mil', '-R$ 2.000').
+    Retorna float, ou None se não houver número único e inequívoco."""
+    if not texto:
+        return None
+    t = texto.strip().lower()
+    achados = re.findall(r"\d[\d.,]*", t)
+    if len(achados) != 1:
+        return None  # nenhum número, ou mais de um (faixa, soma) = ambíguo
+    s = achados[0].rstrip(".,")
+    if "," in s:
+        s = s.replace(".", "").replace(",", ".")
+    elif s.count(".") > 1 or (s.count(".") == 1 and len(s.split(".")[1]) == 3):
+        s = s.replace(".", "")  # ponto de milhar (38.500 / 1.234.567)
+    try:
+        v = float(s)
+    except ValueError:
+        return None
+    if "mil" in t and v < 1000:
+        v *= 1000
+    if t.lstrip().startswith("-") or "-r$" in t or "prejuízo" in t or "prejuizo" in t:
+        v = -abs(v)
+    return v
+
+def _campos_do_bloco(bloco):
+    campos = {}
+    for linha in bloco.splitlines():
+        if ":" in linha:
+            k, _, v = linha.partition(":")
+            campos[k.strip().lower()] = v.strip()
+    return campos
+
+def _fmt_br(v, dec=1):
+    s = f"{v:,.{dec}f}".replace(",", "X").replace(".", ",").replace("X", ".")
+    return s[:-2] if s.endswith(",0") else s
+
+def calcular_motor(dados):
+    """Retorna (indicadores, radar): listas de linhas calculadas dos dados.
+    Listas vazias se nada foi parseável — o prompt então cai no modo antigo."""
+    if "=== DADOS ATUAIS ===" in dados:
+        atual_txt = dados.split("=== DADOS ATUAIS ===", 1)[1]
+    else:
+        atual_txt = dados
+    ant_txt = ""
+    if "DADOS DAQUELA ANÁLISE:" in dados:
+        ant_txt = dados.split("DADOS DAQUELA ANÁLISE:", 1)[1]
+        for corte in ("DECISÕES RECOMENDADAS", "=== ANÁLISE ANTERIOR 2", "=== DADOS ATUAIS"):
+            if corte in ant_txt:
+                ant_txt = ant_txt.split(corte, 1)[0]
+    atual = {k: _num_br(v) for k, v in _campos_do_bloco(atual_txt).items()}
+    ant = {k: _num_br(v) for k, v in _campos_do_bloco(ant_txt).items()} if ant_txt else {}
+
+    indicadores, radar = [], []
+    fat = atual.get("faturamento")
+    meta = atual.get("meta")
+    custos = atual.get("custos")
+    lucro = atual.get("lucro")
+
+    if fat and fat > 0 and lucro is not None:
+        margem = lucro / fat * 100
+        indicadores.append(f"Margem líquida: {_fmt_br(margem)}% (lucro R$ {_fmt_br(lucro)} / faturamento R$ {_fmt_br(fat)})")
+        band = "🔴" if margem < 0 else ("🟡" if margem < 10 else "🟢")
+        rotulo = "prejuízo" if margem < 0 else ("margem apertada" if margem < 10 else "margem saudável")
+        radar.append(f"{band} Margem líquida: {_fmt_br(margem)}% ({rotulo})")
+    if fat and fat > 0 and meta and meta > 0:
+        ating = fat / meta * 100
+        indicadores.append(f"Atingimento da meta: {_fmt_br(ating)}% (faturou R$ {_fmt_br(fat)} de uma meta de R$ {_fmt_br(meta)})")
+        band = "🟢" if ating >= 95 else ("🟡" if ating >= 70 else "🔴")
+        radar.append(f"{band} Meta do período: {_fmt_br(ating)}% atingida")
+    if fat and fat > 0 and custos and custos > 0:
+        peso = custos / fat * 100
+        indicadores.append(f"Custos sobre faturamento: {_fmt_br(peso)}%")
+        if lucro is not None:
+            dif = (fat - custos) - lucro
+            if abs(dif) > 0.15 * fat:
+                radar.append(f"🟡 Números não fecham: faturamento menos custos dá R$ {_fmt_br(fat - custos)}, "
+                             f"mas o lucro informado é R$ {_fmt_br(lucro)} — vale conferir os lançamentos")
+    for chave, nome in (("faturamento", "Faturamento"), ("lucro", "Lucro"), ("ticket_medio", "Ticket médio")):
+        a, b = atual.get(chave), ant.get(chave)
+        if a is not None and b:
+            delta = (a - b) / abs(b) * 100
+            indicadores.append(f"{nome}: {'+' if delta >= 0 else ''}{_fmt_br(delta)}% vs análise anterior "
+                               f"(de R$ {_fmt_br(b)} para R$ {_fmt_br(a)})")
+            if chave == "faturamento":
+                band = "🟢" if delta > 0 else ("🟡" if delta >= -5 else "🔴")
+                radar.append(f"{band} Faturamento vs análise anterior: {'+' if delta >= 0 else ''}{_fmt_br(delta)}%")
+    return indicadores, radar
+
 def gerar_analise(dados, segmento):
     modos = {
         "Loja / Varejo e Moda": "🟢 MODO GIRO — foco em estoque, giro de produtos, preço, promoção e vendas rápidas.",
@@ -156,22 +251,37 @@ def gerar_analise(dados, segmento):
     }
     modo = modos.get(segmento, "")
     tem_historico = "=== ANÁLISE ANTERIOR" in dados
+    indicadores, radar = calcular_motor(dados)
 
-    # Formato de saída montado aqui (determinístico): a seção de evolução só
+    # Formato de saída montado aqui (determinístico): Radar abre quando o Motor
+    # calculou bandeiras; senão cai no Diagnóstico textual. A seção de evolução só
     # existe quando o app mandou análises anteriores junto com os dados.
-    secoes = [
-        "📌 1. DIAGNÓSTICO GERAL\n"
-        "A saúde real do negócio em 2 a 4 linhas diretas: se está saudável, em risco ou em crise, "
-        "citando os números que provam (margem, faturamento vs meta). Sem suavizar e sem dramatizar."
-    ]
+    if radar:
+        secoes = [
+            "📌 1. RADAR DO NEGÓCIO\n"
+            "Abra com as linhas do bloco RADAR CALCULADO, EXATAMENTE como fornecidas (não altere bandeiras nem números, "
+            "não crie bandeiras numéricas novas). Depois, se os dados sustentarem, acrescente no máximo 2 linhas "
+            "qualitativas de radar (🔴/🟡/🟢) sobre pontos NÃO numéricos, terminando cada uma com '(leitura)'. "
+            "Feche com 2 linhas de síntese direta da saúde do negócio."
+        ]
+    else:
+        secoes = [
+            "📌 1. DIAGNÓSTICO GERAL\n"
+            "A saúde real do negócio em 2 a 4 linhas diretas: se está saudável, em risco ou em crise, "
+            "citando os números que provam (margem, faturamento vs meta). Sem suavizar e sem dramatizar."
+        ]
     num = 2
     if tem_historico:
         secoes.append(
             f"🔄 {num}. EVOLUÇÃO DESDE A ÚLTIMA ANÁLISE\n"
             "Compare os números atuais com os da análise anterior: o que melhorou, o que piorou e o que ficou igual — "
-            "sempre com os números lado a lado. Se uma decisão recomendada na análise anterior aparentemente não foi "
-            "executada, diga com franqueza e mostre o custo de continuar adiando. Se foi executada e deu resultado, "
-            "reconheça com números."
+            "sempre com os números lado a lado (use os INDICADORES CALCULADOS quando existirem). "
+            "Se a análise anterior tiver seção de METAS, confira meta a meta: cumprida, parcial ou não cumprida — "
+            "só quando os campos atuais permitirem conferir; se não permitirem, diga 'não informado desta vez'. "
+            "Se um problema aparecer repetido em análises seguidas, nomeie a reincidência "
+            "(ex.: 'é a 2ª análise seguida com ruptura do produto campeão'). "
+            "Se uma decisão recomendada aparentemente não foi executada, diga com franqueza e mostre o custo de "
+            "continuar adiando. Se foi executada e deu resultado, reconheça com números."
         )
         num += 1
     secoes.append(f"🎯 {num}. DECISÃO MAIS IMPORTANTE AGORA\nUma única decisão crítica e direta."); num += 1
@@ -190,7 +300,14 @@ def gerar_analise(dados, segmento):
         "recorrentes, dependência de um único canal, tendência de queda). Se não houver nenhum, escreva apenas: "
         "Nenhum alerta crítico neste período."
     ); num += 1
-    secoes.append(f"🧭 {num}. PRÓXIMO PASSO\nUma instrução final clara de continuidade.")
+    secoes.append(
+        f"🧭 {num}. METAS ATÉ A PRÓXIMA ANÁLISE\n"
+        "2 a 3 metas específicas, cada uma com número-alvo, VERIFICÁVEIS pelos próprios campos do formulário na "
+        "próxima análise (ex.: 'Ticket médio: de R$ 85 para R$ 92', 'Zerar o estoque de casacos de inverno'). "
+        "Devem derivar das ações recomendadas acima. Nada de metas impossíveis de conferir "
+        "(ex.: 'melhorar o atendimento' não vale). "
+        "Feche com uma frase curta convidando a rodar a próxima análise no fim do período para conferir as metas."
+    )
     formato = "\n\n".join(secoes)
 
     instrucao_historico = ""
@@ -198,9 +315,18 @@ def gerar_analise(dados, segmento):
         instrucao_historico = (
             "HISTÓRICO: os dados contêm blocos '=== ANÁLISE ANTERIOR ===' com dados e decisões de análises passadas "
             "DESTE MESMO negócio, geradas pelo próprio NEXO em períodos anteriores. Use esses blocos SOMENTE para "
-            "avaliar a evolução (o que melhorou, o que piorou, o que foi recomendado e não foi executado). "
+            "avaliar a evolução (o que melhorou, o que piorou, metas cumpridas ou não, problemas reincidentes). "
             "As decisões novas devem se basear nos dados do bloco '=== DADOS ATUAIS ==='.\n\n"
         )
+
+    bloco_motor = ""
+    if indicadores or radar:
+        bloco_motor = "INDICADORES CALCULADOS (cálculo exato do Motor NEXO — use estes números, NÃO recalcule):\n"
+        bloco_motor += "".join(f"- {i}\n" for i in indicadores)
+        if radar:
+            bloco_motor += "\nRADAR CALCULADO (reproduza na seção 1 exatamente como está):\n"
+            bloco_motor += "".join(f"{r}\n" for r in radar)
+        bloco_motor += "\n"
 
     resposta = groq_client.chat.completions.create(
         model="llama-3.3-70b-versatile",
@@ -237,6 +363,7 @@ def gerar_analise(dados, segmento):
                 f"RESTRIÇÃO DE TEMPO: respeite estritamente o campo 'Tempo disponível para implementação'. "
                 f"Nenhuma ação pode exigir, por semana, mais tempo do que o informado pelo cliente.\n\n"
                 f"REGRA FINAL DE QUALIDADE: se a resposta não terminar com uma decisão clara e executável, a resposta é inválida.\n\n"
+                f"{bloco_motor}"
                 f"DADOS DO NEGÓCIO:\n{dados}"
             )
         }]
