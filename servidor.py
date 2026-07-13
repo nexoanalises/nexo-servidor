@@ -155,6 +155,53 @@ def gerar_analise(dados, segmento):
         "Academia / Fitness": "🏋️ MODO RETENÇÃO — foco em retenção de clientes, cancelamentos, recorrência, engajamento e reativação.",
     }
     modo = modos.get(segmento, "")
+    tem_historico = "=== ANÁLISE ANTERIOR" in dados
+
+    # Formato de saída montado aqui (determinístico): a seção de evolução só
+    # existe quando o app mandou análises anteriores junto com os dados.
+    secoes = [
+        "📌 1. DIAGNÓSTICO GERAL\n"
+        "A saúde real do negócio em 2 a 4 linhas diretas: se está saudável, em risco ou em crise, "
+        "citando os números que provam (margem, faturamento vs meta). Sem suavizar e sem dramatizar."
+    ]
+    num = 2
+    if tem_historico:
+        secoes.append(
+            f"🔄 {num}. EVOLUÇÃO DESDE A ÚLTIMA ANÁLISE\n"
+            "Compare os números atuais com os da análise anterior: o que melhorou, o que piorou e o que ficou igual — "
+            "sempre com os números lado a lado. Se uma decisão recomendada na análise anterior aparentemente não foi "
+            "executada, diga com franqueza e mostre o custo de continuar adiando. Se foi executada e deu resultado, "
+            "reconheça com números."
+        )
+        num += 1
+    secoes.append(f"🎯 {num}. DECISÃO MAIS IMPORTANTE AGORA\nUma única decisão crítica e direta."); num += 1
+    secoes.append(
+        f"🔧 {num}. AÇÕES IMEDIATAS\n"
+        "No máximo 3 ações práticas, executáveis e simples, compatíveis com a verba e o tempo informados. "
+        "Ao final de CADA ação, acrescente uma tag curta entre parênteses com o custo e o prazo de resultado, "
+        "neste formato exato: (Custo: zero | Resultado em: ~7 dias). "
+        "Use valores realistas em reais (ou 'zero') e prazos aproximados. Não use notas, pontuações ou percentuais de prioridade."
+    ); num += 1
+    secoes.append(f"⚠️ {num}. O QUE ESTÁ TE FAZENDO PERDER DINHEIRO\nProblemas claros e acionáveis identificados nos dados."); num += 1
+    secoes.append(f"📈 {num}. OPORTUNIDADE MAIS RÁPIDA DE GANHO\nUma ação de retorno rápido e realista."); num += 1
+    secoes.append(
+        f"🚨 {num}. ALERTAS\n"
+        "Até 3 riscos latentes que ainda não exigem ação imediata, mas merecem atenção (ex.: fornecedor com defeitos "
+        "recorrentes, dependência de um único canal, tendência de queda). Se não houver nenhum, escreva apenas: "
+        "Nenhum alerta crítico neste período."
+    ); num += 1
+    secoes.append(f"🧭 {num}. PRÓXIMO PASSO\nUma instrução final clara de continuidade.")
+    formato = "\n\n".join(secoes)
+
+    instrucao_historico = ""
+    if tem_historico:
+        instrucao_historico = (
+            "HISTÓRICO: os dados contêm blocos '=== ANÁLISE ANTERIOR ===' com dados e decisões de análises passadas "
+            "DESTE MESMO negócio, geradas pelo próprio NEXO em períodos anteriores. Use esses blocos SOMENTE para "
+            "avaliar a evolução (o que melhorou, o que piorou, o que foi recomendado e não foi executado). "
+            "As decisões novas devem se basear nos dados do bloco '=== DADOS ATUAIS ==='.\n\n"
+        )
+
     resposta = groq_client.chat.completions.create(
         model="llama-3.3-70b-versatile",
         messages=[{
@@ -176,21 +223,10 @@ def gerar_analise(dados, segmento):
                 f"Evite: 'seria interessante', 'recomenda-se avaliar', 'pode-se considerar'.\n\n"
                 f"PRINCÍPIO CENTRAL: a qualidade da decisão depende diretamente da qualidade das informações fornecidas. "
                 f"Use TODOS os dados do negócio informados abaixo — cada número e detalhe ajuda a calibrar a decisão.\n\n"
+                f"{instrucao_historico}"
                 f"MODO DE DECISÃO DESTE NEGÓCIO: {modo}\n\n"
                 f"FORMATO OBRIGATÓRIO DE SAÍDA (use exatamente estes títulos, nesta ordem):\n\n"
-                f"🎯 1. DECISÃO MAIS IMPORTANTE AGORA\n"
-                f"Uma única decisão crítica e direta.\n\n"
-                f"🔧 2. AÇÕES IMEDIATAS\n"
-                f"No máximo 3 ações práticas, executáveis e simples, compatíveis com a verba e o tempo informados. "
-                f"Ao final de CADA ação, acrescente uma tag curta entre parênteses com o custo e o prazo de resultado, "
-                f"neste formato exato: (Custo: zero | Resultado em: ~7 dias). "
-                f"Use valores realistas em reais (ou 'zero') e prazos aproximados. Não use notas, pontuações ou percentuais de prioridade.\n\n"
-                f"⚠️ 3. O QUE ESTÁ TE FAZENDO PERDER DINHEIRO\n"
-                f"Problemas claros e acionáveis identificados nos dados.\n\n"
-                f"📈 4. OPORTUNIDADE MAIS RÁPIDA DE GANHO\n"
-                f"Uma ação de retorno rápido e realista.\n\n"
-                f"🧭 5. PRÓXIMO PASSO\n"
-                f"Uma instrução final clara de continuidade.\n\n"
+                f"{formato}\n\n"
                 f"PRIORIZAÇÃO INTERNA (NÃO EXIBIR AO USUÁRIO): antes de responder, avalie cada ação possível por impacto no resultado, "
                 f"facilidade de execução, custo em relação à verba disponível e consumo do tempo semanal disponível. "
                 f"Priorize sempre alto impacto + alta facilidade + baixo custo + baixo consumo de tempo. "
