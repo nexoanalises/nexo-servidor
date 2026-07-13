@@ -296,9 +296,11 @@ def gerar_analise(dados, segmento):
     secoes.append(f"📈 {num}. OPORTUNIDADE MAIS RÁPIDA DE GANHO\nUma ação de retorno rápido e realista."); num += 1
     secoes.append(
         f"🚨 {num}. ALERTAS\n"
-        "Até 3 riscos latentes que ainda não exigem ação imediata, mas merecem atenção (ex.: fornecedor com defeitos "
-        "recorrentes, dependência de um único canal, tendência de queda). Se não houver nenhum, escreva apenas: "
-        "Nenhum alerta crítico neste período."
+        "Até 3 riscos latentes que ainda não exigem ação imediata, mas merecem atenção. "
+        "Antes de escrever esta seção, VARRA os campos de reclamações, trocas/defeitos, fornecedores (atrasos e "
+        "defeitos recorrentes — cite o nome do fornecedor quando informado), dependência de um único canal de vendas "
+        "e tendência de queda em qualquer número. Defeito ou atraso de fornecedor citado nos dados é SEMPRE alerta. "
+        "Somente se realmente não houver nenhum risco nos dados, escreva apenas: Nenhum alerta crítico neste período."
     ); num += 1
     secoes.append(
         f"🧭 {num}. METAS ATÉ A PRÓXIMA ANÁLISE\n"
