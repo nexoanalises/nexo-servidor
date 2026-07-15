@@ -245,6 +245,11 @@ def calcular_motor(dados):
 def gerar_analise(dados, segmento):
     modos = {
         "Loja / Varejo e Moda": "🟢 MODO GIRO — foco em estoque, giro de produtos, preço, promoção e vendas rápidas.",
+        "Perfumaria e Cosméticos": "🟢 MODO GIRO — foco em giro de produtos, validade, margem por categoria, preço e promoção.",
+        "Pet Shop": "🟢 MODO GIRO — foco em giro de produtos, ocupação da agenda de serviços e recorrência de clientes.",
+        "Celular e Acessórios": "🟢 MODO GIRO — foco em giro rápido (estoque desvaloriza), mix venda × assistência e proteção de margem.",
+        "Loja Multicanal (física + online)": "🟢 MODO GIRO — foco em comparar canais: onde está o lucro real depois de taxas e frete, e onde reforçar.",
+        # Segmentos legados (#040): apps antigos em campo ainda enviam estes nomes.
         "Farmácia": "🟢 MODO GIRO — foco em estoque, giro de produtos, preço, promoção e vendas rápidas.",
         "Restaurante / Alimentação": "🍽️ MODO FLUXO — foco em tempo de atendimento, ticket médio, eficiência operacional, cardápio e desperdício.",
         "Academia / Fitness": "🏋️ MODO RETENÇÃO — foco em retenção de clientes, cancelamentos, recorrência, engajamento e reativação.",
