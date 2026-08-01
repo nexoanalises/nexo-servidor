@@ -55,7 +55,7 @@ APP_TOKEN = os.environ.get("APP_TOKEN", "")
 # Modelo da análise. O app nunca manda este campo — existe para comparar modelos
 # com os MESMOS dados antes de trocar o padrão, em vez de decidir por benchmark
 # de terceiro. Allowlist: request não escolhe modelo caro fora desta lista.
-MODELO_PADRAO = os.environ.get("GROQ_MODELO", "openai/gpt-oss-120b")
+MODELO_PADRAO = os.environ.get("GROQ_MODELO", "llama-3.3-70b-versatile")
 MODELOS_PERMITIDOS = {
     "llama-3.3-70b-versatile",
     "openai/gpt-oss-120b",
