@@ -401,7 +401,10 @@ def gerar_analise(dados, segmento):
                 f"escreva a frase SEM número — descrever bem vale mais que calcular errado.\n"
                 f"- NÚMERO-META (o alvo que VOCÊ está propondo, ex.: 'liquidar a -40%', 'reduzir em 30%'): "
                 f"esse você escolhe, e ele é bem-vindo. Nunca apresente número-meta como se fosse resultado apurado.\n"
-                f"Nunca atribua a um fornecedor, canal ou produto uma taxa ou percentual que não esteja nos dados.\n\n"
+                f"Nunca atribua a um fornecedor, canal ou produto uma taxa ou percentual que não esteja nos dados.\n"
+                f"ATENÇÃO — esta regra NÃO manda omitir informação: repetir uma quantidade que já está escrita nos dados "
+                f"('3 blusas com defeito do fornecedor X') é citar, não é calcular, e continua OBRIGATÓRIO. "
+                f"Na dúvida, cite o fato sem transformá-lo em percentual.\n\n"
 
                 f"🔑 REGRA DA ALAVANCA NOMEADA (a mais importante depois daquela):\n"
                 f"Toda decisão e toda ação nomeia A ALAVANCA, O ALVO e A DIREÇÃO, com número-meta quando fizer sentido "
