@@ -35,7 +35,7 @@ APP_TOKEN = os.environ.get("APP_TOKEN", "")
 # Modelo da análise. O app nunca manda este campo — existe para comparar modelos
 # com os MESMOS dados antes de trocar o padrão, em vez de decidir por benchmark
 # de terceiro. Allowlist: request não escolhe modelo caro fora desta lista.
-MODELO_PADRAO = os.environ.get("GROQ_MODELO", "llama-3.3-70b-versatile")
+MODELO_PADRAO = os.environ.get("GROQ_MODELO", "openai/gpt-oss-120b")
 MODELOS_PERMITIDOS = {
     "llama-3.3-70b-versatile",
     "openai/gpt-oss-120b",
@@ -403,6 +403,14 @@ def gerar_analise(dados, segmento, modelo=None):
                 f"Use TODOS os dados do negócio informados abaixo — cada número e detalhe ajuda a calibrar a decisão.\n\n"
                 f"{instrucao_historico}"
                 f"MODO DE DECISÃO DESTE NEGÓCIO: {modo}\n\n"
+                f"📄 FORMATAÇÃO — a saída vai direto para um PDF que não interpreta markdown:\n"
+                f"- Escreva em TEXTO PURO. Proibido '**', '###', '---', '```', tabelas e qualquer marcação.\n"
+                f"- Cada título de seção começa pelo emoji e pelo número, exatamente como no formato pedido, "
+                f"e a linha do título não leva nenhum outro caractere de marcação.\n"
+                f"- Números no padrão brasileiro: R$ 18.000 (ponto no milhar), 8,5% (vírgula decimal, "
+                f"sem espaço antes do %). Nunca 'R$ 18 000' nem '8,5 %'.\n"
+                f"- Escreva tudo em português do Brasil; nenhuma palavra em outro idioma.\n\n"
+
                 f"🚫 PROIBIDO INVENTAR NÚMERO (regra que vence todas as outras):\n"
                 f"Existem dois tipos de número, e eles não se misturam:\n"
                 f"- NÚMERO-FATO (afirma algo sobre o negócio): só pode sair de duas fontes — um valor que aparece "
