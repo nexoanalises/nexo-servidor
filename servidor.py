@@ -13,6 +13,26 @@ from groq import Groq
 
 app = Flask(__name__)
 
+# ─── PORTEIRO DA ROTA DE ANÁLISE ────────────────────────────────────────────────
+# A /analisar não exige licença no modo demo (o app publicado não manda token), então
+# sem isto ela é um proxy de LLM aberto: dá pra queimar a chave da Groq em loop ou
+# mandar payload de megabytes. Custo zero, sem dependência nova e sem tocar no app.
+app.config["MAX_CONTENT_LENGTH"] = 256 * 1024      # 256 KB — análise real não passa de ~10 KB
+ANALISES_POR_HORA = 20                              # lojista real faz 1 ou 2 por mês
+_chamadas = {}                                      # ip -> [timestamps]
+
+def _ip_do_pedido():
+    encaminhado = request.headers.get("X-Forwarded-For", "")
+    return (encaminhado.split(",")[0].strip() if encaminhado else request.remote_addr) or "?"
+
+def _passou_do_limite(ip):
+    agora = datetime.now().timestamp()
+    recentes = [t for t in _chamadas.get(ip, []) if agora - t < 3600]
+    if len(_chamadas) > 5000:                       # não deixa o dicionário crescer sem fim
+        _chamadas.clear()
+    _chamadas[ip] = recentes + [agora]
+    return len(recentes) >= ANALISES_POR_HORA
+
 # ─── CONFIGURAÇÃO ───────────────────────────────────────────────────────────────
 SENDER_EMAIL   = os.environ.get("SENDER_EMAIL", "contato@nexosoft.com.br")
 BREVO_API_KEY  = os.environ.get("BREVO_API_KEY")
@@ -182,19 +202,44 @@ def _num_br(texto):
         v = float(s)
     except ValueError:
         return None
-    if "mil" in t and v < 1000:
+    # "mil" como PALAVRA. Sem o \b, "fa-mil-iar" e "si-mil-ar" multiplicavam por 1000:
+    # "R$ 900 (familiar)" virava R$ 900.000, em silêncio.
+    if re.search(r"\bmil\b", t) and v < 1000:
         v *= 1000
-    if t.lstrip().startswith("-") or "-r$" in t or "prejuízo" in t or "prejuizo" in t:
+    # Sinal negativo só quando o marcador está COLADO no número, ou quando o prejuízo
+    # é afirmado. "R$ 5.000 (sem prejuízo este mês)" é lucro, não perda.
+    prejuizo_negado = re.search(r"\b(sem|nenhum|zero|nada de|não teve|nao teve)\s+(preju[íi]zo)", t)
+    prejuizo_afirmado = re.search(r"\bpreju[íi]zo\b", t) and not prejuizo_negado
+    if re.search(r"(^|\s)-\s*r?\$?\s*\d", t) or prejuizo_afirmado:
         v = -abs(v)
     return v
 
+# Rótulos como o lojista os vê na tela — para o aviso falar a língua dele.
+ROTULOS_CAMPOS = {
+    "faturamento": "Faturamento do período", "meta": "Meta de faturamento",
+    "custos": "Investimento/Custos do período", "lucro": "Lucro líquido",
+    "ticket_medio": "Ticket médio", "clientes": "Número de clientes atendidos",
+    "conversao": "Taxa de conversão", "capacidade": "Capacidade operacional ocupada",
+}
+CAMPOS_CRITICOS = ("faturamento", "meta", "custos", "lucro", "ticket_medio")
+
 def _campos_do_bloco(bloco):
-    campos = {}
+    """Primeira ocorrência VENCE. Antes vencia a última, e uma linha 'lucro: 1'
+    digitada dentro das Observações sobrescrevia o lucro real do formulário —
+    em silêncio. Devolve também as chaves repetidas, para o aviso ao cliente."""
+    campos, repetidos = {}, []
     for linha in bloco.splitlines():
         if ":" in linha:
             k, _, v = linha.partition(":")
-            campos[k.strip().lower()] = v.strip()
-    return campos
+            k = k.strip().lower()
+            if not re.fullmatch(r"[a-z_]+", k):
+                continue  # "Dos R$ 57.100 de custos" não é nome de campo
+            if k in campos:
+                if k in CAMPOS_CRITICOS and k not in repetidos:
+                    repetidos.append(k)
+                continue
+            campos[k] = v.strip()
+    return campos, repetidos
 
 def _fmt_br(v, dec=1):
     s = f"{v:,.{dec}f}".replace(",", "X").replace(".", ",").replace("X", ".")
@@ -213,10 +258,29 @@ def calcular_motor(dados):
         for corte in ("DECISÕES RECOMENDADAS", "=== ANÁLISE ANTERIOR 2", "=== DADOS ATUAIS"):
             if corte in ant_txt:
                 ant_txt = ant_txt.split(corte, 1)[0]
-    atual = {k: _num_br(v) for k, v in _campos_do_bloco(atual_txt).items()}
-    ant = {k: _num_br(v) for k, v in _campos_do_bloco(ant_txt).items()} if ant_txt else {}
+    atual_bruto, repetidos = _campos_do_bloco(atual_txt)
+    atual = {k: _num_br(v) for k, v in atual_bruto.items()}
+    ant = {k: _num_br(v) for k, v in _campos_do_bloco(ant_txt)[0].items()} if ant_txt else {}
 
     indicadores, radar = [], []
+
+    # AVISO EM VEZ DE CHUTE: campo crítico preenchido que o Motor não conseguiu ler
+    # vira linha visível no PDF, com o que o cliente escreveu e como corrigir.
+    # Silêncio aqui já custou análise errada entregue como se fosse certa.
+    for chave in CAMPOS_CRITICOS:
+        escrito = atual_bruto.get(chave, "").strip()
+        if escrito and atual.get(chave) is None:
+            rotulo = ROTULOS_CAMPOS.get(chave, chave)
+            radar.append(
+                f"🟡 Não consegui ler o campo \"{rotulo}\" com segurança — você escreveu "
+                f"\"{escrito[:60]}\". Escreva só o número (ex.: 38500). "
+                f"Esta análise saiu sem os cálculos que dependem desse campo (leitura)")
+    for chave in repetidos:
+        rotulo = ROTULOS_CAMPOS.get(chave, chave)
+        radar.append(
+            f"🟡 O campo \"{rotulo}\" apareceu mais de uma vez nos dados. Usei o valor do "
+            f"formulário. Se você escreveu esse valor de novo dentro das Observações ou dos "
+            f"Desafios, ele foi ignorado (leitura)")
     fat = atual.get("faturamento")
     meta = atual.get("meta")
     custos = atual.get("custos")
@@ -245,27 +309,34 @@ def calcular_motor(dados):
     # aritmética do "faturei mais e não sobrou". Calculado aqui, em Python, porque é a
     # informação que o dono procura — não pode depender de o modelo reparar nela.
     fat_ant, custos_ant = ant.get("faturamento"), ant.get("custos")
-    if fat and fat > 0 and custos and custos > 0 and fat_ant and custos_ant:
+    if fat and fat > 0 and custos and custos > 0 and fat_ant and fat_ant > 0 and custos_ant and custos_ant > 0:
         peso_ant = custos_ant / fat_ant * 100
         peso_atual = custos / fat * 100
-        d_fat = (fat - fat_ant) / abs(fat_ant) * 100
-        d_cus = (custos - custos_ant) / abs(custos_ant) * 100
-        indicadores.append(
-            f"Custos vs faturamento: custos {'+' if d_cus >= 0 else ''}{_fmt_br(d_cus)}% contra "
-            f"faturamento {'+' if d_fat >= 0 else ''}{_fmt_br(d_fat)}%; o peso dos custos foi de "
-            f"{_fmt_br(peso_ant)}% para {_fmt_br(peso_atual)}% do faturamento")
-        if d_cus > d_fat and d_cus > 0:
-            vezes = d_cus / d_fat if d_fat > 0 else None
-            extra = f", {_fmt_br(vezes)}x mais rápido" if vezes and vezes >= 1.2 else ""
-            if d_fat >= 0:
-                movimento = f"o faturamento subiu {_fmt_br(d_fat)}%{extra}"
-                fecho = "o crescimento não virou lucro"
-            else:
-                movimento = f"o faturamento caiu {_fmt_br(abs(d_fat))}%"
-                fecho = "custo subindo com venda caindo"
-            radar.append(
-                f"🔴 O dinheiro ficou no custo: custos subiram {_fmt_br(d_cus)}% e "
-                f"{movimento} — {fecho}")
+        d_fat = (fat - fat_ant) / fat_ant * 100
+        d_cus = (custos - custos_ant) / custos_ant * 100
+        # Sanidade: campo mal preenchido gera percentual absurdo, e o prompt manda
+        # reproduzir a linha como fato. Fora da faixa, o Motor cala em vez de mentir.
+        if max(peso_ant, peso_atual) <= 300 and max(abs(d_fat), abs(d_cus)) <= 300:
+            indicadores.append(
+                f"Custos sobre faturamento: eram {_fmt_br(peso_ant)}% do faturamento e agora são "
+                f"{_fmt_br(peso_atual)}% (custos {'+' if d_cus >= 0 else ''}{_fmt_br(d_cus)}%, "
+                f"faturamento {'+' if d_fat >= 0 else ''}{_fmt_br(d_fat)}%)")
+            # O que importa não é o custo ter subido — é ele ter passado a comer uma
+            # fatia MAIOR de cada real vendido. Folga de 3 pontos contra ruído.
+            if peso_atual > peso_ant + 3:
+                lucro_ant = ant.get("lucro")
+                if lucro is not None and lucro_ant is not None:
+                    if lucro < lucro_ant:
+                        fecho = "e o lucro caiu"
+                    elif lucro > lucro_ant:
+                        fecho = "o lucro subiu, mas cada real vendido está deixando menos"
+                    else:
+                        fecho = "e o lucro ficou parado no mesmo lugar"
+                else:
+                    fecho = "cada real vendido está deixando menos no bolso"
+                radar.append(
+                    f"🔴 Os custos passaram a comer uma fatia maior do seu faturamento: "
+                    f"de {_fmt_br(peso_ant)}% para {_fmt_br(peso_atual)}% — {fecho}")
 
     for chave, nome in (("faturamento", "Faturamento"), ("lucro", "Lucro"), ("ticket_medio", "Ticket médio")):
         a, b = atual.get(chave), ant.get(chave)
@@ -281,11 +352,16 @@ def calcular_motor(dados):
 def _normalizar_saida(texto):
     """Higiene determinística da resposta do modelo: o que dá pra garantir em Python
     não fica dependendo de o modelo obedecer. Vale pra qualquer modelo."""
+    if not texto:
+        return ""
     t = texto.replace("**", "").replace("###", "").replace("##", "")
-    t = re.sub(r"^\s*[-–—]{3,}\s*$", "", t, flags=re.M)     # linhas de régua markdown
-    t = re.sub(r"(\d)\s+%", r"\1%", t)                       # "8,5 %" -> "8,5%"
-    t = re.sub(r"(R\$)\s*(\d{1,3}) (\d{3})\b", r"\1 \2.\3", t)  # "R$ 18 000" -> "R$ 18.000"
-    t = re.sub(r"[ \t]+$", "", t, flags=re.M)                # espaços no fim da linha
+    t = re.sub(r"^[ \t]*[-–—]{3,}[ \t]*$", "", t, flags=re.M)   # linhas de régua markdown
+    t = re.sub(r"(\d)[ \t]+%", r"\1%", t)                       # "8,5 %" -> "8,5%"
+    # "R$ 18 000" e "R$ 1 234 567" -> ponto de milhar brasileiro, em todos os grupos.
+    # Só dentro da mesma linha, para não colar o valor de uma linha no texto da outra.
+    t = re.sub(r"(R\$[ \t]*\d{1,3}(?:[ \t]\d{3})+)",
+               lambda m: re.sub(r"[ \t](\d{3})", r".\1", m.group(1)), t)
+    t = re.sub(r"[ \t]+$", "", t, flags=re.M)                   # espaços no fim da linha
     t = re.sub(r"\n{3,}", "\n\n", t)
     return t.strip()
 
@@ -330,6 +406,8 @@ def gerar_analise(dados, segmento, modelo=None):
             "sempre com os números lado a lado (use os INDICADORES CALCULADOS quando existirem). "
             "Se a análise anterior tiver seção de METAS, confira meta a meta: cumprida, parcial ou não cumprida — "
             "só quando os campos atuais permitirem conferir; se não permitirem, diga 'não informado desta vez'. "
+            "OBRIGATÓRIO citar também O QUE MELHOROU (clientes atendidos, conversão, ticket médio, canal que cresceu) — "
+            "o dono precisa saber o que está funcionando para não desmontar justamente isso. "
             "Se um problema aparecer repetido em análises seguidas, nomeie a reincidência "
             "(ex.: 'é a 2ª análise seguida com ruptura do produto campeão'). "
             "Se uma decisão recomendada aparentemente não foi executada, diga com franqueza e mostre o custo de "
@@ -341,6 +419,11 @@ def gerar_analise(dados, segmento, modelo=None):
         f"🔧 {num}. AÇÕES IMEDIATAS\n"
         "No máximo 3 ações práticas, executáveis e simples, compatíveis com a verba e o tempo informados. "
         "Cada ação obedece à REGRA DA ALAVANCA NOMEADA: alavanca + alvo + direção, com número. "
+        "Se os dados citam DEFEITO ou ATRASO de fornecedor, uma das ações é ACIONAR esse fornecedor "
+        "(troca, crédito ou substituição das peças, com o nome dele e a quantidade que está nos dados) — "
+        "é dinheiro de volta a custo zero, e alerta passivo não recupera nada. "
+        "Se há reclamação repetida de clientes sobre um produto (numeração, tamanho, defeito), "
+        "trate-a como conserto barato e concreto, não como observação. "
         "Ao final de CADA ação, acrescente uma tag curta entre parênteses com o custo e o prazo de resultado, "
         "neste formato exato: (Custo: zero | Resultado em: ~7 dias). "
         "Use valores realistas em reais (ou 'zero') e prazos aproximados. Não use notas, pontuações ou percentuais de prioridade."
@@ -389,7 +472,7 @@ def gerar_analise(dados, segmento, modelo=None):
             bloco_motor += "".join(f"{r}\n" for r in radar)
         bloco_motor += "\n"
 
-    modelo_usado = modelo if modelo in MODELOS_PERMITIDOS else MODELO_PADRAO
+    modelo_usado = modelo if isinstance(modelo, str) and modelo in MODELOS_PERMITIDOS else MODELO_PADRAO
     resposta = groq_client.chat.completions.create(
         model=modelo_usado,
         messages=[{
@@ -417,9 +500,12 @@ def gerar_analise(dados, segmento, modelo=None):
                 f"📅 HOJE É {datetime.now().strftime('%d/%m/%Y')}. Todo prazo que você propuser tem de ser FUTURO "
                 f"em relação a esta data — o período analisado já terminou, e prazo no passado invalida a ação.\n\n"
 
-                f"⚖️ NÃO CONTRADIGA O MOTOR: o resultado do negócio já vem decidido nas linhas calculadas. "
-                f"Se a margem calculada é positiva, o negócio teve LUCRO BAIXO — nunca escreva 'prejuízo', "
-                f"'lucro negativo' ou equivalente. Contradizer o Motor invalida a resposta.\n\n"
+                f"⚖️ NÃO CONTRADIGA O MOTOR, E NÃO INVENTE RÓTULO CONCORRENTE: o resultado do negócio já vem "
+                f"decidido nas linhas calculadas. Se a margem calculada é positiva, HOUVE LUCRO — nunca escreva "
+                f"'prejuízo' nem 'lucro negativo'. Use o mesmo rótulo que o Radar usou ('margem apertada', "
+                f"'margem saudável', 'prejuízo'); não crie um julgamento paralelo que brigue com ele. "
+                f"Também não afirme que o lucro caiu, subiu ou ficou igual sem que os números calculados digam isso. "
+                f"Contradizer o Motor invalida a resposta.\n\n"
 
                 f"📄 FORMATAÇÃO — a saída vai direto para um PDF que não interpreta markdown:\n"
                 f"- Escreva em TEXTO PURO. Proibido '**', '###', '---', '```', tabelas e qualquer marcação.\n"
@@ -450,8 +536,14 @@ def gerar_analise(dados, segmento, modelo=None):
                 f"palavra que ele possa resolver de duas formas diferentes é decisão perdida.\n"
                 f"- PROIBIDO: 'fazer promoções', 'ajustar os preços', 'otimizar o estoque', 'melhorar o atendimento', "
                 f"'revisar os processos', ou qualquer ordem sem alvo nomeado.\n"
-                f"- OBRIGATÓRIO no lugar: 'liquidar o blazer de alfaiataria e a saia longa jeans a -40% até o fim do mês', "
-                f"'subir o preço do vestido midi em 8%', 'responder o WhatsApp até as 20h no sábado'.\n\n"
+                f"- OBRIGATÓRIO no lugar: 'liquidar o blazer de alfaiataria e a saia longa jeans a -40% nos próximos 15 dias', "
+                f"'subir o preço do vestido midi em 8%', 'responder o WhatsApp até as 20h no sábado'.\n"
+                f"- Ao falar de estoque encalhado, nomeie o item E o tamanho/variação encalhada quando os dados trouxerem "
+                f"(ex.: 'GG e XG'). É o tamanho que corrige a PRÓXIMA COMPRA — sem ele o dono repete o erro.\n"
+                f"- PROIBIDA QUALQUER AMBIGUIDADE: se uma frase puder ser lida de duas formas, reescreva. "
+                f"Comparação sempre diz explicitamente o que é comparado com o quê "
+                f"(errado: 'custos subiram 21,7% e o faturamento 13,9%, 1,6x mais rápido'; "
+                f"certo: 'os custos subiram 1,6x mais rápido que o faturamento').\n\n"
 
                 f"⚖️ AS DUAS ALAVANCAS DE PREÇO SÃO OPOSTAS — NUNCA NA MESMA FRASE:\n"
                 f"- LIQUIDAR o encalhado: sacrifica margem DE PROPÓSITO para recuperar CAIXA. Só vale para item parado.\n"
@@ -501,6 +593,11 @@ def analisar():
         if APP_TOKEN and request.headers.get("X-App-Token", "") != APP_TOKEN:
             return jsonify({"status": "erro", "motivo": "Acesso não autorizado."}), 401
 
+        if _passou_do_limite(_ip_do_pedido()):
+            return jsonify({"status": "erro",
+                            "motivo": "Muitas análises seguidas deste computador. "
+                                      "Tente novamente em alguns minutos."}), 429
+
         body = request.json or {}
         modo     = body.get("modo", "demo")
         segmento = body.get("segmento", "")
@@ -519,8 +616,12 @@ def analisar():
         return jsonify({"status": "ok", "analise": analise}), 200
 
     except Exception as e:
-        print(f"ERRO no /analisar: {e}")
-        return jsonify({"status": "erro", "motivo": f"Falha ao gerar a análise: {e}"}), 200
+        # Detalhe técnico fica no log do servidor; o cliente não vê mensagem interna
+        # do Python na tela (o app exibe este 'motivo' direto pro lojista).
+        print(f"ERRO no /analisar: {type(e).__name__}: {e}")
+        return jsonify({"status": "erro",
+                        "motivo": "Não foi possível gerar a análise agora. "
+                                  "Tente novamente em instantes."}), 200
 
 # ─── WEBHOOK ────────────────────────────────────────────────────────────────────
 
