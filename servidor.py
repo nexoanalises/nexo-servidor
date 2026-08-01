@@ -293,12 +293,19 @@ def gerar_analise(dados, segmento):
     secoes.append(
         f"🔧 {num}. AÇÕES IMEDIATAS\n"
         "No máximo 3 ações práticas, executáveis e simples, compatíveis com a verba e o tempo informados. "
+        "Cada ação obedece à REGRA DA ALAVANCA NOMEADA: alavanca + alvo + direção, com número. "
         "Ao final de CADA ação, acrescente uma tag curta entre parênteses com o custo e o prazo de resultado, "
         "neste formato exato: (Custo: zero | Resultado em: ~7 dias). "
         "Use valores realistas em reais (ou 'zero') e prazos aproximados. Não use notas, pontuações ou percentuais de prioridade."
     ); num += 1
     secoes.append(f"⚠️ {num}. O QUE ESTÁ TE FAZENDO PERDER DINHEIRO\nProblemas claros e acionáveis identificados nos dados."); num += 1
-    secoes.append(f"📈 {num}. OPORTUNIDADE MAIS RÁPIDA DE GANHO\nUma ação de retorno rápido e realista."); num += 1
+    secoes.append(
+        f"📈 {num}. OPORTUNIDADE MAIS RÁPIDA DE GANHO\n"
+        "Uma ação de retorno rápido e realista. Antes de escolher, olhe o campo de vendas por canal: se um canal já "
+        "responde por fatia relevante do faturamento E os dados apontam fricção nele (demora na resposta, reclamação, "
+        "ausência de atendimento em algum horário), essa costuma ser a oportunidade mais barata que existe — "
+        "o cliente já está lá, só está esbarrando em algo. Não repita a mesma ação da seção de decisão."
+    ); num += 1
     secoes.append(
         f"🚨 {num}. ALERTAS\n"
         "Até 3 riscos latentes que ainda não exigem ação imediata, mas merecem atenção. "
@@ -352,12 +359,37 @@ def gerar_analise(dados, segmento):
                 f"- Proibido ignorar o tempo disponível.\n"
                 f"- Proibido recomendações impossíveis de executar pelo próprio dono.\n"
                 f"- Sempre priorize simplicidade e execução imediata.\n"
-                f"- Sempre use linguagem direta e de ação: implemente, ajuste, corrija, organize, reduza, aumente, reative, otimize, divulgue. "
-                f"Evite: 'seria interessante', 'recomenda-se avaliar', 'pode-se considerar'.\n\n"
+                f"- Sempre use linguagem direta e de ação — e TODO verbo carrega alvo e número: "
+                f"'reduza o estoque de blazer em 50%', nunca 'otimize o estoque'. "
+                f"Evite: 'seria interessante', 'recomenda-se avaliar', 'pode-se considerar', 'otimizar', 'melhorar', 'trabalhar melhor'.\n\n"
                 f"PRINCÍPIO CENTRAL: a qualidade da decisão depende diretamente da qualidade das informações fornecidas. "
                 f"Use TODOS os dados do negócio informados abaixo — cada número e detalhe ajuda a calibrar a decisão.\n\n"
                 f"{instrucao_historico}"
                 f"MODO DE DECISÃO DESTE NEGÓCIO: {modo}\n\n"
+                f"🔑 REGRA DA ALAVANCA NOMEADA (a mais importante deste prompt):\n"
+                f"Toda decisão e toda ação nomeia A ALAVANCA, O ALVO e A DIREÇÃO, com número sempre que houver. "
+                f"Quem lê é um lojista ocupado que vai executar o que ENTENDEU, não o que você quis dizer — "
+                f"palavra que ele possa resolver de duas formas diferentes é decisão perdida.\n"
+                f"- PROIBIDO: 'fazer promoções', 'ajustar os preços', 'otimizar o estoque', 'melhorar o atendimento', "
+                f"'revisar os processos', ou qualquer ordem sem alvo nomeado.\n"
+                f"- OBRIGATÓRIO no lugar: 'liquidar o blazer de alfaiataria e a saia longa jeans a -40% até o fim do mês', "
+                f"'subir o preço do vestido midi em 8%', 'responder o WhatsApp até as 20h no sábado'.\n\n"
+
+                f"⚖️ AS DUAS ALAVANCAS DE PREÇO SÃO OPOSTAS — NUNCA NA MESMA FRASE:\n"
+                f"- LIQUIDAR o encalhado: sacrifica margem DE PROPÓSITO para recuperar CAIXA. Só vale para item parado.\n"
+                f"- REPRECIFICAR o que gira: recupera MARGEM. Só vale para item de alta saída.\n"
+                f"Escrever 'faça promoção para aumentar a margem' é contradição e invalida a resposta. "
+                f"Diga sempre QUAL das duas, em QUAIS itens, e O QUE ela recupera — caixa ou margem.\n\n"
+
+                f"💰 CAPITAL PARADO — cruzamento obrigatório: se os custos do período incluem COMPRA DE ESTOQUE e os dados "
+                f"declaram estoque encalhado, parado ou de coleção anterior, diga explicitamente que o lucro não desapareceu, "
+                f"ele VIROU ESTOQUE — com os dois valores lado a lado (quanto foi comprado × quanto está parado). "
+                f"É a explicação que o dono procura quando fatura mais e não sobra dinheiro no fim do mês.\n\n"
+
+                f"🔁 NÃO RECOMENDE O QUE JÁ FOI TENTADO: varre os campos de desafios e observações antes de decidir. "
+                f"Se o dono declarou ter feito algo (ex.: 'dei muito desconto'), NÃO recomende a mesma coisa. "
+                f"Reconheça que já foi tentado, diga por que não resolveu e proponha uma alavanca DIFERENTE.\n\n"
+
                 f"FORMATO OBRIGATÓRIO DE SAÍDA (use exatamente estes títulos, nesta ordem):\n\n"
                 f"{formato}\n\n"
                 f"PRIORIZAÇÃO INTERNA (NÃO EXIBIR AO USUÁRIO): antes de responder, avalie cada ação possível por impacto no resultado, "
