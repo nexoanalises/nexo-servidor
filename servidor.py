@@ -241,6 +241,11 @@ def _campos_do_bloco(bloco):
             campos[k] = v.strip()
     return campos, repetidos
 
+def _pct_sao(*valores, limite=300):
+    """Percentual fora desta faixa quase sempre é campo mal preenchido, não negócio.
+    O Motor cala em vez de imprimir '+5.900%' sob o selo de 'cálculo exato'."""
+    return all(v is not None and abs(v) <= limite for v in valores)
+
 def _fmt_br(v, dec=1):
     s = f"{v:,.{dec}f}".replace(",", "X").replace(".", ",").replace("X", ".")
     return s[:-2] if s.endswith(",0") else s
@@ -316,7 +321,7 @@ def calcular_motor(dados):
         d_cus = (custos - custos_ant) / custos_ant * 100
         # Sanidade: campo mal preenchido gera percentual absurdo, e o prompt manda
         # reproduzir a linha como fato. Fora da faixa, o Motor cala em vez de mentir.
-        if max(peso_ant, peso_atual) <= 300 and max(abs(d_fat), abs(d_cus)) <= 300:
+        if _pct_sao(peso_ant, peso_atual, d_fat, d_cus):
             indicadores.append(
                 f"Custos sobre faturamento: eram {_fmt_br(peso_ant)}% do faturamento e agora são "
                 f"{_fmt_br(peso_atual)}% (custos {'+' if d_cus >= 0 else ''}{_fmt_br(d_cus)}%, "
@@ -325,23 +330,49 @@ def calcular_motor(dados):
             # fatia MAIOR de cada real vendido. Folga de 3 pontos contra ruído.
             if peso_atual > peso_ant + 3:
                 lucro_ant = ant.get("lucro")
+                # A cor segue o DESFECHO, não o movimento do custo: negócio que cresceu
+                # e lucrou mais não pode abrir o relatório com bandeira vermelha.
                 if lucro is not None and lucro_ant is not None:
                     if lucro < lucro_ant:
-                        fecho = "e o lucro caiu"
+                        band, fecho = "🔴", "e o lucro caiu"
                     elif lucro > lucro_ant:
-                        fecho = "o lucro subiu, mas cada real vendido está deixando menos"
+                        band, fecho = "🟡", "o lucro subiu, mas cada real vendido está deixando menos"
                     else:
-                        fecho = "e o lucro ficou parado no mesmo lugar"
+                        band, fecho = "🟡", "e o lucro ficou parado no mesmo lugar"
                 else:
-                    fecho = "cada real vendido está deixando menos no bolso"
+                    band, fecho = "🟡", "cada real vendido está deixando menos no bolso"
                 radar.append(
-                    f"🔴 Os custos passaram a comer uma fatia maior do seu faturamento: "
+                    f"{band} Os custos passaram a comer uma fatia maior do seu faturamento: "
                     f"de {_fmt_br(peso_ant)}% para {_fmt_br(peso_atual)}% — {fecho}")
+
+    # A MARGEM ENTRE PERÍODOS — é a resposta direta a "para onde foi o dinheiro", e
+    # faltava: o Motor comparava faturamento, lucro e ticket, e deixava de fora
+    # justamente a linha que mede se o negócio ficou mais ou menos lucrativo.
+    fat_ant2, lucro_ant2 = ant.get("faturamento"), ant.get("lucro")
+    if fat and fat > 0 and lucro is not None and fat_ant2 and fat_ant2 > 0 and lucro_ant2 is not None:
+        m_atual, m_ant = lucro / fat * 100, lucro_ant2 / fat_ant2 * 100
+        if _pct_sao(m_atual, m_ant):
+            pontos = m_atual - m_ant
+            indicadores.append(
+                f"Margem líquida vs análise anterior: era {_fmt_br(m_ant)}% e agora é {_fmt_br(m_atual)}% "
+                f"({'+' if pontos >= 0 else ''}{_fmt_br(pontos)} pontos)")
+            if abs(pontos) >= 1:
+                if pontos < 0:
+                    # Vermelho só quando a queda é grande E a margem terminou na faixa
+                    # apertada — o mesmo limiar do rótulo, para as duas linhas não brigarem.
+                    band = "🔴" if (pontos <= -3 and m_atual < 10) else "🟡"
+                    radar.append(f"{band} De cada R$ 100 vendidos sobravam R$ {_fmt_br(m_ant)} e agora sobram "
+                                 f"R$ {_fmt_br(m_atual)} — o negócio ficou menos lucrativo")
+                else:
+                    radar.append(f"🟢 De cada R$ 100 vendidos sobravam R$ {_fmt_br(m_ant)} e agora sobram "
+                                 f"R$ {_fmt_br(m_atual)} — o negócio ficou mais lucrativo")
 
     for chave, nome in (("faturamento", "Faturamento"), ("lucro", "Lucro"), ("ticket_medio", "Ticket médio")):
         a, b = atual.get(chave), ant.get(chave)
         if a is not None and b:
             delta = (a - b) / abs(b) * 100
+            if not _pct_sao(delta):
+                continue  # campo mal preenchido: cala em vez de imprimir '+5.900%' como fato
             indicadores.append(f"{nome}: {'+' if delta >= 0 else ''}{_fmt_br(delta)}% vs análise anterior "
                                f"(de R$ {_fmt_br(b)} para R$ {_fmt_br(a)})")
             if chave == "faturamento":
@@ -552,7 +583,8 @@ def gerar_analise(dados, segmento, modelo=None):
                 f"Diga sempre QUAL das duas, em QUAIS itens, e O QUE ela recupera — caixa ou margem.\n\n"
 
                 f"💰 CAPITAL PARADO — cruzamento OBRIGATÓRIO, é a explicação que o dono mais procura:\n"
-                f"- Se o RADAR CALCULADO trouxer a linha 'O dinheiro ficou no custo', ela é FATO e tem de ser EXPLICADA "
+                f"- Se o RADAR CALCULADO trouxer a linha 'Os custos passaram a comer uma fatia maior' ou a linha "
+                f"'De cada R$ 100 vendidos', ela é FATO e tem de ser EXPLICADA "
                 f"na seção 'o que está te fazendo perder dinheiro': diga para ONDE o dinheiro foi, cruzando com o que os "
                 f"dados dizem sobre compra de estoque, coleção nova e encalhe.\n"
                 f"- Se os custos do período incluem COMPRA DE ESTOQUE e os dados declaram estoque encalhado, parado ou de "
