@@ -278,6 +278,17 @@ def calcular_motor(dados):
                 radar.append(f"{band} Faturamento vs análise anterior: {'+' if delta >= 0 else ''}{_fmt_br(delta)}%")
     return indicadores, radar
 
+def _normalizar_saida(texto):
+    """Higiene determinística da resposta do modelo: o que dá pra garantir em Python
+    não fica dependendo de o modelo obedecer. Vale pra qualquer modelo."""
+    t = texto.replace("**", "").replace("###", "").replace("##", "")
+    t = re.sub(r"^\s*[-–—]{3,}\s*$", "", t, flags=re.M)     # linhas de régua markdown
+    t = re.sub(r"(\d)\s+%", r"\1%", t)                       # "8,5 %" -> "8,5%"
+    t = re.sub(r"(R\$)\s*(\d{1,3}) (\d{3})\b", r"\1 \2.\3", t)  # "R$ 18 000" -> "R$ 18.000"
+    t = re.sub(r"[ \t]+$", "", t, flags=re.M)                # espaços no fim da linha
+    t = re.sub(r"\n{3,}", "\n\n", t)
+    return t.strip()
+
 def gerar_analise(dados, segmento, modelo=None):
     modos = {
         "Loja / Varejo e Moda": "🟢 MODO GIRO — foco em estoque, giro de produtos, preço, promoção e vendas rápidas.",
@@ -403,6 +414,13 @@ def gerar_analise(dados, segmento, modelo=None):
                 f"Use TODOS os dados do negócio informados abaixo — cada número e detalhe ajuda a calibrar a decisão.\n\n"
                 f"{instrucao_historico}"
                 f"MODO DE DECISÃO DESTE NEGÓCIO: {modo}\n\n"
+                f"📅 HOJE É {datetime.now().strftime('%d/%m/%Y')}. Todo prazo que você propuser tem de ser FUTURO "
+                f"em relação a esta data — o período analisado já terminou, e prazo no passado invalida a ação.\n\n"
+
+                f"⚖️ NÃO CONTRADIGA O MOTOR: o resultado do negócio já vem decidido nas linhas calculadas. "
+                f"Se a margem calculada é positiva, o negócio teve LUCRO BAIXO — nunca escreva 'prejuízo', "
+                f"'lucro negativo' ou equivalente. Contradizer o Motor invalida a resposta.\n\n"
+
                 f"📄 FORMATAÇÃO — a saída vai direto para um PDF que não interpreta markdown:\n"
                 f"- Escreva em TEXTO PURO. Proibido '**', '###', '---', '```', tabelas e qualquer marcação.\n"
                 f"- Cada título de seção começa pelo emoji e pelo número, exatamente como no formato pedido, "
@@ -471,7 +489,7 @@ def gerar_analise(dados, segmento, modelo=None):
             )
         }]
     )
-    return resposta.choices[0].message.content
+    return _normalizar_saida(resposta.choices[0].message.content)
 
 @app.route("/analisar", methods=["POST"])
 def analisar():
