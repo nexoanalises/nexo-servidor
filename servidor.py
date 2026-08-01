@@ -32,6 +32,16 @@ groq_client = Groq(api_key=GROQ_API_KEY) if GROQ_API_KEY else None
 # Segredo compartilhado entre o app e o servidor (opcional, dificulta abuso da rota /analisar)
 APP_TOKEN = os.environ.get("APP_TOKEN", "")
 
+# Modelo da análise. O app nunca manda este campo — existe para comparar modelos
+# com os MESMOS dados antes de trocar o padrão, em vez de decidir por benchmark
+# de terceiro. Allowlist: request não escolhe modelo caro fora desta lista.
+MODELO_PADRAO = os.environ.get("GROQ_MODELO", "llama-3.3-70b-versatile")
+MODELOS_PERMITIDOS = {
+    "llama-3.3-70b-versatile",
+    "openai/gpt-oss-120b",
+    "openai/gpt-oss-20b",
+}
+
 PLANOS = {
     "97":  ("lancamento",  0,  "forever"),
     "47":  ("mensal",      1,  "months"),
@@ -268,7 +278,7 @@ def calcular_motor(dados):
                 radar.append(f"{band} Faturamento vs análise anterior: {'+' if delta >= 0 else ''}{_fmt_br(delta)}%")
     return indicadores, radar
 
-def gerar_analise(dados, segmento):
+def gerar_analise(dados, segmento, modelo=None):
     modos = {
         "Loja / Varejo e Moda": "🟢 MODO GIRO — foco em estoque, giro de produtos, preço, promoção e vendas rápidas.",
         "Perfumaria e Cosméticos": "🟢 MODO GIRO — foco em giro de produtos, validade, margem por categoria, preço e promoção.",
@@ -368,8 +378,9 @@ def gerar_analise(dados, segmento):
             bloco_motor += "".join(f"{r}\n" for r in radar)
         bloco_motor += "\n"
 
+    modelo_usado = modelo if modelo in MODELOS_PERMITIDOS else MODELO_PADRAO
     resposta = groq_client.chat.completions.create(
-        model="llama-3.3-70b-versatile",
+        model=modelo_usado,
         messages=[{
             "role": "user",
             "content": (
@@ -478,7 +489,7 @@ def analisar():
             if not chave or not validar_licenca_chave(chave):
                 return jsonify({"status": "erro", "motivo": "Licença inválida ou expirada."}), 403
 
-        analise = gerar_analise(dados, segmento)
+        analise = gerar_analise(dados, segmento, body.get("modelo"))
         return jsonify({"status": "ok", "analise": analise}), 200
 
     except Exception as e:
