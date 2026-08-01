@@ -291,17 +291,64 @@ def calcular_motor(dados):
     custos = atual.get("custos")
     lucro = atual.get("lucro")
 
-    if fat and fat > 0 and lucro is not None:
-        margem = lucro / fat * 100
+    # O Radar tem de contar UMA história que fecha sozinha, na ordem em que o dono
+    # pensa: vendi quanto → gastei quanto → sobrou quanto → sobra quanto de cada 100.
+    # Antes cada linha estava certa e o conjunto não explicava nada: "meta 104%
+    # atingida" colava em "o lucro caiu" sem a ponte, e o aumento dos custos — que é
+    # a ponte — não aparecia em lugar nenhum.
+    fat_ant, custos_ant, lucro_ant = ant.get("faturamento"), ant.get("custos"), ant.get("lucro")
+    conta_historia = bool(fat and fat > 0 and fat_ant and fat_ant > 0
+                          and custos and custos > 0 and custos_ant and custos_ant > 0
+                          and lucro is not None and lucro_ant is not None)
+
+    margem = lucro / fat * 100 if (fat and fat > 0 and lucro is not None) else None
+    if margem is not None:
         indicadores.append(f"Margem líquida: {_fmt_br(margem)}% (lucro R$ {_fmt_br(lucro)} / faturamento R$ {_fmt_br(fat)})")
-        band = "🔴" if margem < 0 else ("🟡" if margem < 10 else "🟢")
-        rotulo = "prejuízo" if margem < 0 else ("margem apertada" if margem < 10 else "margem saudável")
-        radar.append(f"{band} Margem líquida: {_fmt_br(margem)}% ({rotulo})")
-    if fat and fat > 0 and meta and meta > 0:
-        ating = fat / meta * 100
+    ating = fat / meta * 100 if (fat and fat > 0 and meta and meta > 0) else None
+    if ating is not None:
         indicadores.append(f"Atingimento da meta: {_fmt_br(ating)}% (faturou R$ {_fmt_br(fat)} de uma meta de R$ {_fmt_br(meta)})")
-        band = "🟢" if ating >= 95 else ("🟡" if ating >= 70 else "🔴")
-        radar.append(f"{band} Meta do período: {_fmt_br(ating)}% atingida")
+    rotulo_margem = None
+    if margem is not None:
+        rotulo_margem = "prejuízo" if margem < 0 else ("margem apertada" if margem < 10 else "margem saudável")
+
+    if conta_historia:
+        d_fat = (fat - fat_ant) / fat_ant * 100
+        d_cus = (custos - custos_ant) / custos_ant * 100
+        d_luc = (lucro - lucro_ant) / abs(lucro_ant) * 100 if lucro_ant else None
+        m_ant = lucro_ant / fat_ant * 100
+        if _pct_sao(d_fat, d_cus, margem, m_ant) and (d_luc is None or _pct_sao(d_luc)):
+            # 1. vendi quanto
+            sinal = "+" if d_fat >= 0 else ""
+            texto_meta = ""
+            if ating is not None:
+                texto_meta = (f" — e bateu a meta de R$ {_fmt_br(meta)} ({_fmt_br(ating)}%)" if ating >= 95
+                              else f" — mas ficou em {_fmt_br(ating)}% da meta de R$ {_fmt_br(meta)}")
+            radar.append(f"{'🟢' if d_fat > 0 else '🔴'} Faturamento: R$ {_fmt_br(fat_ant)} → R$ {_fmt_br(fat)} "
+                         f"({sinal}{_fmt_br(d_fat)}%){texto_meta}")
+            # 2. gastei quanto — a ponte que faltava
+            comparativo = ("subiram MAIS que o faturamento" if d_cus > d_fat
+                           else "subiram menos que o faturamento" if d_cus > 0
+                           else "caíram")
+            radar.append(f"{'🔴' if d_cus > d_fat else '🟢'} Custos: R$ {_fmt_br(custos_ant)} → R$ {_fmt_br(custos)} "
+                         f"({'+' if d_cus >= 0 else ''}{_fmt_br(d_cus)}%) — {comparativo}")
+            # 3. sobrou quanto
+            if d_luc is not None:
+                radar.append(f"{'🟢' if d_luc >= 0 else '🔴'} Lucro: R$ {_fmt_br(lucro_ant)} → R$ {_fmt_br(lucro)} "
+                             f"({'+' if d_luc >= 0 else ''}{_fmt_br(d_luc)}%)")
+            # 4. sobra quanto de cada R$ 100 — a régua que o dono entende sem conta
+            band = "🟢" if margem >= m_ant else ("🔴" if (m_ant - margem >= 3 and margem < 10) else "🟡")
+            radar.append(f"{band} De cada R$ 100 vendidos sobravam R$ {_fmt_br(m_ant, 2)} e agora sobram "
+                         f"R$ {_fmt_br(margem, 2)} ({rotulo_margem})")
+        else:
+            conta_historia = False
+
+    if not conta_historia:
+        if margem is not None:
+            band = "🔴" if margem < 0 else ("🟡" if margem < 10 else "🟢")
+            radar.append(f"{band} Margem líquida: {_fmt_br(margem)}% ({rotulo_margem})")
+        if ating is not None:
+            band = "🟢" if ating >= 95 else ("🟡" if ating >= 70 else "🔴")
+            radar.append(f"{band} Meta do período: {_fmt_br(ating)}% atingida")
     if fat and fat > 0 and custos and custos > 0:
         peso = custos / fat * 100
         indicadores.append(f"Custos sobre faturamento: {_fmt_br(peso)}%")
@@ -326,24 +373,6 @@ def calcular_motor(dados):
                 f"Custos sobre faturamento: eram {_fmt_br(peso_ant)}% do faturamento e agora são "
                 f"{_fmt_br(peso_atual)}% (custos {'+' if d_cus >= 0 else ''}{_fmt_br(d_cus)}%, "
                 f"faturamento {'+' if d_fat >= 0 else ''}{_fmt_br(d_fat)}%)")
-            # O que importa não é o custo ter subido — é ele ter passado a comer uma
-            # fatia MAIOR de cada real vendido. Folga de 3 pontos contra ruído.
-            if peso_atual > peso_ant + 3:
-                lucro_ant = ant.get("lucro")
-                # A cor segue o DESFECHO, não o movimento do custo: negócio que cresceu
-                # e lucrou mais não pode abrir o relatório com bandeira vermelha.
-                if lucro is not None and lucro_ant is not None:
-                    if lucro < lucro_ant:
-                        band, fecho = "🔴", "e o lucro caiu"
-                    elif lucro > lucro_ant:
-                        band, fecho = "🟡", "o lucro subiu, mas cada real vendido está deixando menos"
-                    else:
-                        band, fecho = "🟡", "e o lucro ficou parado no mesmo lugar"
-                else:
-                    band, fecho = "🟡", "cada real vendido está deixando menos no bolso"
-                radar.append(
-                    f"{band} Os custos passaram a comer uma fatia maior do seu faturamento: "
-                    f"de {_fmt_br(peso_ant)}% para {_fmt_br(peso_atual)}% — {fecho}")
 
     # A MARGEM ENTRE PERÍODOS — é a resposta direta a "para onde foi o dinheiro", e
     # faltava: o Motor comparava faturamento, lucro e ticket, e deixava de fora
@@ -356,16 +385,6 @@ def calcular_motor(dados):
             indicadores.append(
                 f"Margem líquida vs análise anterior: era {_fmt_br(m_ant)}% e agora é {_fmt_br(m_atual)}% "
                 f"({'+' if pontos >= 0 else ''}{_fmt_br(pontos)} pontos)")
-            if abs(pontos) >= 1:
-                if pontos < 0:
-                    # Vermelho só quando a queda é grande E a margem terminou na faixa
-                    # apertada — o mesmo limiar do rótulo, para as duas linhas não brigarem.
-                    band = "🔴" if (pontos <= -3 and m_atual < 10) else "🟡"
-                    radar.append(f"{band} De cada R$ 100 vendidos sobravam R$ {_fmt_br(m_ant)} e agora sobram "
-                                 f"R$ {_fmt_br(m_atual)} — o negócio ficou menos lucrativo")
-                else:
-                    radar.append(f"🟢 De cada R$ 100 vendidos sobravam R$ {_fmt_br(m_ant)} e agora sobram "
-                                 f"R$ {_fmt_br(m_atual)} — o negócio ficou mais lucrativo")
 
     for chave, nome in (("faturamento", "Faturamento"), ("lucro", "Lucro"), ("ticket_medio", "Ticket médio")):
         a, b = atual.get(chave), ant.get(chave)
@@ -375,7 +394,7 @@ def calcular_motor(dados):
                 continue  # campo mal preenchido: cala em vez de imprimir '+5.900%' como fato
             indicadores.append(f"{nome}: {'+' if delta >= 0 else ''}{_fmt_br(delta)}% vs análise anterior "
                                f"(de R$ {_fmt_br(b)} para R$ {_fmt_br(a)})")
-            if chave == "faturamento":
+            if chave == "faturamento" and not conta_historia:
                 band = "🟢" if delta > 0 else ("🟡" if delta >= -5 else "🔴")
                 radar.append(f"{band} Faturamento vs análise anterior: {'+' if delta >= 0 else ''}{_fmt_br(delta)}%")
     return indicadores, radar
