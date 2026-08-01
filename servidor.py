@@ -231,6 +231,32 @@ def calcular_motor(dados):
             if abs(dif) > 0.15 * fat:
                 radar.append(f"🟡 Números não fecham: faturamento menos custos dá R$ {_fmt_br(fat - custos)}, "
                              f"mas o lucro informado é R$ {_fmt_br(lucro)} — vale conferir os lançamentos")
+    # Para onde o dinheiro foi: custo crescendo mais rápido que faturamento é a explicação
+    # aritmética do "faturei mais e não sobrou". Calculado aqui, em Python, porque é a
+    # informação que o dono procura — não pode depender de o modelo reparar nela.
+    fat_ant, custos_ant = ant.get("faturamento"), ant.get("custos")
+    if fat and fat > 0 and custos and custos > 0 and fat_ant and custos_ant:
+        peso_ant = custos_ant / fat_ant * 100
+        peso_atual = custos / fat * 100
+        d_fat = (fat - fat_ant) / abs(fat_ant) * 100
+        d_cus = (custos - custos_ant) / abs(custos_ant) * 100
+        indicadores.append(
+            f"Custos vs faturamento: custos {'+' if d_cus >= 0 else ''}{_fmt_br(d_cus)}% contra "
+            f"faturamento {'+' if d_fat >= 0 else ''}{_fmt_br(d_fat)}%; o peso dos custos foi de "
+            f"{_fmt_br(peso_ant)}% para {_fmt_br(peso_atual)}% do faturamento")
+        if d_cus > d_fat and d_cus > 0:
+            vezes = d_cus / d_fat if d_fat > 0 else None
+            extra = f", {_fmt_br(vezes)}x mais rápido" if vezes and vezes >= 1.2 else ""
+            if d_fat >= 0:
+                movimento = f"o faturamento subiu {_fmt_br(d_fat)}%{extra}"
+                fecho = "o crescimento não virou lucro"
+            else:
+                movimento = f"o faturamento caiu {_fmt_br(abs(d_fat))}%"
+                fecho = "custo subindo com venda caindo"
+            radar.append(
+                f"🔴 O dinheiro ficou no custo: custos subiram {_fmt_br(d_cus)}% e "
+                f"{movimento} — {fecho}")
+
     for chave, nome in (("faturamento", "Faturamento"), ("lucro", "Lucro"), ("ticket_medio", "Ticket médio")):
         a, b = atual.get(chave), ant.get(chave)
         if a is not None and b:
@@ -381,10 +407,14 @@ def gerar_analise(dados, segmento):
                 f"Escrever 'faça promoção para aumentar a margem' é contradição e invalida a resposta. "
                 f"Diga sempre QUAL das duas, em QUAIS itens, e O QUE ela recupera — caixa ou margem.\n\n"
 
-                f"💰 CAPITAL PARADO — cruzamento obrigatório: se os custos do período incluem COMPRA DE ESTOQUE e os dados "
-                f"declaram estoque encalhado, parado ou de coleção anterior, diga explicitamente que o lucro não desapareceu, "
-                f"ele VIROU ESTOQUE — com os dois valores lado a lado (quanto foi comprado × quanto está parado). "
-                f"É a explicação que o dono procura quando fatura mais e não sobra dinheiro no fim do mês.\n\n"
+                f"💰 CAPITAL PARADO — cruzamento OBRIGATÓRIO, é a explicação que o dono mais procura:\n"
+                f"- Se o RADAR CALCULADO trouxer a linha 'O dinheiro ficou no custo', ela é FATO e tem de ser EXPLICADA "
+                f"na seção 'o que está te fazendo perder dinheiro': diga para ONDE o dinheiro foi, cruzando com o que os "
+                f"dados dizem sobre compra de estoque, coleção nova e encalhe.\n"
+                f"- Se os custos do período incluem COMPRA DE ESTOQUE e os dados declaram estoque encalhado, parado ou de "
+                f"coleção anterior, diga explicitamente que o lucro não desapareceu, ele VIROU ESTOQUE — com os dois valores "
+                f"lado a lado (quanto foi comprado × quanto está parado).\n"
+                f"- Nunca trate 'margem apertada' como causa. Margem apertada é sintoma; a causa é onde o dinheiro entrou.\n\n"
 
                 f"🔁 NÃO RECOMENDE O QUE JÁ FOI TENTADO: varre os campos de desafios e observações antes de decidir. "
                 f"Se o dono declarou ter feito algo (ex.: 'dei muito desconto'), NÃO recomende a mesma coisa. "
