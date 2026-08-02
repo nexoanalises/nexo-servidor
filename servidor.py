@@ -715,10 +715,13 @@ def gerar_analise(dados, segmento, modelo=None):
     ); num += 1
     secoes.append(
         f"🧭 {num}. METAS ATÉ A PRÓXIMA ANÁLISE\n"
-        "2 a 3 metas específicas, cada uma com número-alvo, VERIFICÁVEIS pelos próprios campos do formulário na "
-        "próxima análise (ex.: 'Ticket médio: de R$ 85 para R$ 92', 'Zerar o estoque de casacos de inverno'). "
-        "Devem derivar das ações recomendadas acima. Nada de metas impossíveis de conferir "
-        "(ex.: 'melhorar o atendimento' não vale). "
+        "2 a 3 metas, todas com PRAZO 'até a próxima análise' — nunca 60 ou 90 dias, porque a próxima análise é a "
+        "que confere. Cada meta sai de um CAMPO NUMÉRICO do formulário e parte do valor atual, que já está "
+        "calculado (ex.: 'Margem líquida: de 8,5% para 10%' · 'Ticket médio: de R$ 120 para R$ 128'). "
+        "🚫 PROIBIDO meta sobre quantidade de estoque, percentual de encalhe vendido ou percentual de desconto: "
+        "o formulário não tem esses números, então a meta não teria como ser conferida nem como ter sido escolhida. "
+        "Se a decisão do período for sobre estoque, a meta correspondente é a que o estoque DEVE MOVER — margem, "
+        "lucro ou faturamento. Nada de 'melhorar o atendimento'. "
         "Feche com uma frase curta convidando a rodar a próxima análise no fim do período para conferir as metas."
     )
     formato = "\n\n".join(secoes)
