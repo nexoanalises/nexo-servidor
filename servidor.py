@@ -640,6 +640,20 @@ def gerar_analise(dados, segmento, modelo=None):
             "citando os números que provam (margem, faturamento vs meta). Sem suavizar e sem dramatizar."
         ]
     num = 2
+    # Oito números viram uma frase que o dono entende sem fazer conta. Vem logo depois
+    # do Radar porque é a leitura do Radar, não uma seção nova de conteúdo.
+    secoes.append(
+        f"🧭 {num}. DIAGNÓSTICO CENTRAL\n"
+        "Duas partes, nesta ordem e nada além disso:\n"
+        "• UMA FRASE CURTA, em linguagem de dono de loja, dizendo o que aconteceu no período "
+        "(ex.: 'Você vendeu mais, mas ganhou menos.' · 'Você vendeu menos e ainda gastou mais.' · "
+        "'Você vendeu mais e ganhou mais.'). Sem jargão, sem número nessa frase.\n"
+        "• UM PARÁGRAFO curto com os números que sustentam a frase, tirados das linhas calculadas "
+        "(ex.: 'O faturamento cresceu 13,9%, mas os custos cresceram 21,7%. Com isso o lucro caiu 32,9% "
+        "e a margem passou de 14,4% para 8,5%.').\n"
+        "Não repita isto nas outras seções e não emende recomendação aqui — diagnóstico é o que É, "
+        "não o que fazer."
+    ); num += 1
     if tem_historico:
         secoes.append(
             f"🔄 {num}. EVOLUÇÃO DESDE A ÚLTIMA ANÁLISE\n"
@@ -653,7 +667,16 @@ def gerar_analise(dados, segmento, modelo=None):
             "Se um problema aparecer repetido em análises seguidas, nomeie a reincidência "
             "(ex.: 'é a 2ª análise seguida com ruptura do produto campeão'). "
             "Fale sempre do RESULTADO, nunca da conduta do dono: diga se a meta foi atingida e o que os números "
-            "mostram, jamais se ele executou ou deixou de executar. Se deu resultado, reconheça com números."
+            "mostram, jamais se ele executou ou deixou de executar. Se deu resultado, reconheça com números.\n"
+            "📚 FECHE A SEÇÃO COM O APRENDIZADO, em quatro linhas curtas e nesta ordem — é o que transforma "
+            "comparação em conhecimento, e é a razão de o histórico existir:\n"
+            "  'O que foi recomendado:' a decisão da análise anterior, em uma linha.\n"
+            "  'O que aconteceu:' os números que respondem a ela, os que melhoraram E os que pioraram.\n"
+            "  'O que isso ensina:' a lição em uma frase, sobre o MECANISMO — o que a estratégia conseguiu e o "
+            "que ela não protegeu (ex.: 'a estratégia aumentou as vendas, mas não protegeu a rentabilidade').\n"
+            "  'O que muda agora:' como essa lição altera a decisão deste período.\n"
+            "Se não houver decisão anterior registrada, escreva 'primeira análise com histórico — sem "
+            "recomendação anterior para conferir' e pule as outras três linhas."
         )
         num += 1
     secoes.append(f"🎯 {num}. DECISÃO MAIS IMPORTANTE AGORA\nUma única decisão crítica e direta."); num += 1
@@ -754,7 +777,18 @@ def gerar_analise(dados, segmento, modelo=None):
                 f"- PROIBIDO afirmar CAUSA que os dados não isolam. Nunca escreva que algo aconteceu 'por causa' de "
                 f"outra coisa sem prova nos números. Escreva 'pode ter contribuído' e diga o que faltaria para saber.\n"
                 f"- PROIBIDO afirmar que uma decisão anterior não foi executada. Você não sabe. Se os dados mostram o "
-                f"contrário do esperado, diga o RESULTADO ('a meta X não foi atingida'), nunca a conduta do dono.\n\n"
+                f"contrário do esperado, diga o RESULTADO ('a meta X não foi atingida'), nunca a conduta do dono.\n"
+                f"- PROIBIDO apontar UMA saída como se fosse a única. Margem apertada não significa 'cortar custos': "
+                f"pode ser compra, preço, desconto ou giro. Escreva a prioridade e as frentes juntas — 'a prioridade é "
+                f"recuperar margem, avaliando ao mesmo tempo custos, descontos e giro do estoque' — e só aponte uma "
+                f"frente isolada quando os números disserem qual é.\n\n"
+
+                f"⚖️ RISCO NÃO É O MESMO QUE OPORTUNIDADE, e canal que CRESCE não é risco:\n"
+                f"- Canal que ganhou participação, ou cresceu em reais, entra como OPORTUNIDADE, com o número do "
+                f"crescimento. Não o chame de 'dependência' nem de 'risco'.\n"
+                f"- Só existe dependência quando um canal responde por MAIS DA METADE das vendas — e aí o canal a "
+                f"nomear é esse, não o que cresceu. Concentração de 28% não é dependência.\n"
+                f"- Canal que PERDEU participação, aí sim, é o que merece atenção de risco.\n\n"
 
                 f"⚖️ NÃO CONTRADIGA O MOTOR, E NÃO INVENTE RÓTULO CONCORRENTE: o resultado do negócio já vem "
                 f"decidido nas linhas calculadas. Se a margem calculada é positiva, HOUVE LUCRO — nunca escreva "
@@ -803,12 +837,16 @@ def gerar_analise(dados, segmento, modelo=None):
                 f"(errado: 'custos subiram 21,7% e o faturamento 13,9%, 1,6x mais rápido'; "
                 f"certo: 'os custos subiram 1,6x mais rápido que o faturamento').\n\n"
 
-                f"💸 NÃO ARBITRE PERCENTUAL DE DESCONTO — o formulário não pergunta custo unitário, quantidade em "
-                f"estoque, preço atual nem há quanto tempo a peça está parada. Sem isso, '-40%' é palpite com cara de "
-                f"decisão. Escreva a AÇÃO com alvo e prazo — 'criar uma ação de giro para o blazer e a saia longa nos "
-                f"próximos 15 dias' — e diga qual dado tornaria possível cravar o percentual. "
-                f"O mesmo vale para meta de corte de custo: só proponha percentual de redução se puder dizer EM QUE "
-                f"linha o corte acontece; senão, a ação é mapear os custos controláveis primeiro.\n\n"
+                f"💸 NENHUM PERCENTUAL ARBITRADO, EM LUGAR NENHUM — nem em ação, nem em meta, nem em alerta.\n"
+                f"- O formulário NÃO pergunta custo unitário, preço atual, quantidade em estoque, margem por produto "
+                f"nem há quanto tempo a peça está parada. Sem isso, '-40% de desconto', 'reduzir o estoque em 50%', "
+                f"'vender 20% do encalhe' e 'cortar 10% dos custos' são todos palpite com cara de decisão.\n"
+                f"- Escreva a AÇÃO com ALVO e PRAZO, e diga que o número quem define é o dono: 'criar uma ação de giro "
+                f"para o blazer de alfaiataria e a saia longa jeans nos próximos 30 dias, definindo o desconto depois "
+                f"de olhar a margem e o custo dessas peças'.\n"
+                f"- Percentual SÓ é permitido quando sai de um número que está nos dados ou nas linhas calculadas "
+                f"(ex.: 'levar a margem de 8,5% para 10%' — os 8,5% foram calculados). Meta sobre estoque, quantidade "
+                f"ou desconto não tem base: troque por meta de margem, de lucro ou de faturamento, que têm.\n\n"
 
                 f"⚖️ AS DUAS ALAVANCAS DE PREÇO SÃO OPOSTAS — NUNCA NA MESMA FRASE:\n"
                 f"- LIQUIDAR o encalhado: sacrifica margem DE PROPÓSITO para recuperar CAIXA. Só vale para item parado.\n"
