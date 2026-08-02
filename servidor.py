@@ -208,7 +208,10 @@ def _num_br(texto):
         v *= 1000
     # Sinal negativo só quando o marcador está COLADO no número, ou quando o prejuízo
     # é afirmado. "R$ 5.000 (sem prejuízo este mês)" é lucro, não perda.
-    prejuizo_negado = re.search(r"\b(sem|nenhum|zero|nada de|não teve|nao teve)\s+(preju[íi]zo)", t)
+    prejuizo_negado = re.search(
+        r"\b(sem|nenhum|zero|nada de)\s+(nenhum\s+)?preju[íi]zo"
+        r"|\b(não|nao|nunca|jamais)\s+\w*\s*(tive|teve|tivemos|houve|deu)\s*(nenhum\s+)?preju[íi]zo"
+        r"|preju[íi]zo\s+(zero|nenhum|algum)", t)
     prejuizo_afirmado = re.search(r"\bpreju[íi]zo\b", t) and not prejuizo_negado
     if re.search(r"(^|\s)-\s*r?\$?\s*\d", t) or prejuizo_afirmado:
         v = -abs(v)
@@ -221,7 +224,8 @@ ROTULOS_CAMPOS = {
     "ticket_medio": "Ticket médio", "clientes": "Número de clientes atendidos",
     "conversao": "Taxa de conversão", "capacidade": "Capacidade operacional ocupada",
     "proporcao_loja": "Percentual de vendas: Roupas vs Calçados", "vendas_canal": "Vendas por canal",
-    "mix_categoria": "Mix por categoria", "proporcao": "Proporção informada",
+    "proporcao_pet": "Produtos vs Serviços", "proporcao_assistencia": "Vendas vs Assistência técnica",
+    "agenda_ocupacao": "Ocupação da agenda de serviços", "funcionarios": "Número de funcionários",
 }
 CAMPOS_CRITICOS = ("faturamento", "meta", "custos", "lucro", "ticket_medio")
 
@@ -237,48 +241,143 @@ CAMPOS_COMPARAVEIS = (
     ("conversao",    "Taxa de conversão",        "percentual"),
     ("capacidade",   "Capacidade ocupada",       "percentual"),
     ("fornecedores", "Fornecedores no prazo",    "percentual"),
-    ("ocupacao",     "Ocupação da agenda",       "percentual"),
+    ("agenda_ocupacao", "Ocupação da agenda",    "percentual"),
     ("recorrentes",  "Clientes recorrentes",     "quantidade"),
 )
+
+# SÓ estes campos são RATEIO — a soma deles tem de fechar 100%. Rodar a conferência
+# em campo de texto livre acusa o cliente de erro que ele não cometeu: "dei 30% de
+# desconto e girei 20% da coleção" somaria 50%. Pior, a dica do próprio app para a
+# capacidade do Pet Shop ("agenda 80% ocupada, loja em 60%") nunca soma 100.
+CAMPOS_RATEIO = ("proporcao_loja", "proporcao_pet", "proporcao_assistencia")
+
+def _pct_do_texto(p):
+    """'70,5' -> 70.5 · '1.250' -> 1250.0. Ponto só é milhar com 3 casas depois."""
+    p = p.rstrip(".,")
+    if "," in p:
+        return float(p.replace(".", "").replace(",", "."))
+    if p.count(".") == 1 and len(p.split(".")[1]) != 3:
+        return float(p)            # 70.5 é decimal, não milhar
+    return float(p.replace(".", ""))
+
+# Rótulos que o lojista usa para custo que NÃO varia com a venda. O que sobra do
+# custo total depois deles é mercadoria e taxa — a parte sobre a qual ele decide.
+ROTULOS_CUSTO_FIXO = (
+    ("aluguel", r"aluguel"), ("folha", r"folha|sal[áa]rio|funcion[áa]rio"),
+    ("energia e internet", r"energia|luz|internet|[áa]gua"),
+    ("contador", r"contador|contabilidade"), ("software", r"sistema|software|assinatura"),
+)
+
+def _custos_fixos(brutos):
+    """Soma os custos fixos que o cliente nomeou no texto livre. Devolve (soma, rótulos)."""
+    texto = " ".join((brutos.get(c) or "") for c in ("observacoes", "desafios", "custos")).lower()
+    total, achados = 0.0, []
+    for rotulo, padrao in ROTULOS_CUSTO_FIXO:
+        m = re.search(r"(?:" + padrao + r")[^0-9r$]{0,25}r?\$?\s*(\d[\d.,]*)", texto)
+        if not m or not m.group(1):
+            continue
+        try:
+            valor = _pct_do_texto(m.group(1))
+        except ValueError:
+            continue
+        if valor > 0:
+            total += valor
+            achados.append(rotulo)
+    return total, achados
+
+def _canais(texto):
+    """'Loja física 60% | WhatsApp 28%' -> {'Loja física': 60.0, 'WhatsApp': 28.0}"""
+    canais = {}
+    for pedaco in re.split(r"[|;/]", texto or ""):
+        m = re.search(r"([A-Za-zÀ-ÿ][A-Za-zÀ-ÿ .]*?)\s*(\d[\d.,]*)\s*%", pedaco)
+        if m:
+            try:
+                canais[m.group(1).strip().rstrip(":")] = _pct_do_texto(m.group(2))
+            except ValueError:
+                pass
+    return canais
+
+def _limpar_eco(texto, limite=45):
+    """O aviso repete o que o cliente escreveu. Texto dele vai para dentro de um bloco
+    que o prompt manda reproduzir exatamente — sem limpar, dá para injetar instrução
+    no miolo do produto por um campo do formulário."""
+    limpo = re.sub(r"[^0-9A-Za-zÀ-ÿ .,%$/()-]", " ", texto)
+    limpo = re.sub(r"\s{2,}", " ", limpo).strip()
+    return (limpo[:limite] + "…") if len(limpo) > limite else limpo
 
 def _conferir_somas_percentuais(brutos):
     """Campo de rateio ('Roupas 85% | Calçados 20%') que não fecha 100% é erro de
     preenchimento — e o produto tem de avisar em vez de analisar em cima dele."""
     avisos = []
-    for chave, texto in brutos.items():
+    for chave in CAMPOS_RATEIO:
+        texto = (brutos.get(chave) or "").strip()
         if not texto or "%" not in texto:
             continue
         partes = re.findall(r"(\d[\d.,]*)\s*%", texto)
         if len(partes) < 2:
             continue
         try:
-            soma = sum(float(p.replace(".", "").replace(",", ".")) for p in partes)
+            soma = sum(_pct_do_texto(p) for p in partes)
         except ValueError:
             continue
         if not 97 <= soma <= 103:
             rotulo = ROTULOS_CAMPOS.get(chave, chave.replace("_", " "))
             avisos.append(
                 f"🟡 Os percentuais do campo \"{rotulo}\" somam {_fmt_br(soma)}%, não 100% — "
-                f"você escreveu \"{texto[:60]}\". Confira antes de usar esta análise (leitura)")
+                f"você escreveu \"{texto[:60]}\". Confira antes de usar esta análise")
     return avisos
 
+# O app escreve os campos gerais SEMPRE nesta ordem, um por linha, e escreve todos
+# — inclusive os vazios. É isso que permite distinguir o campo de verdade de uma
+# linha "lucro: 20.000" que o lojista digitou DENTRO do Objetivo (que é o 3º campo,
+# antes de faturamento/meta/custos/lucro) e que antes vencia o valor real.
+ORDEM_CAMPOS_GERAIS = (
+    "nome_negocio", "periodo", "objetivo_principal", "faturamento", "meta",
+    "custos", "lucro", "verba_melhorias", "tempo_disponivel", "funcionarios",
+    "capacidade", "canais", "vendas_canal", "desafios", "observacoes",
+)
+_POSICAO = {k: i for i, k in enumerate(ORDEM_CAMPOS_GERAIS)}
+
 def _campos_do_bloco(bloco):
-    """Primeira ocorrência VENCE. Antes vencia a última, e uma linha 'lucro: 1'
-    digitada dentro das Observações sobrescrevia o lucro real do formulário —
-    em silêncio. Devolve também as chaves repetidas, para o aviso ao cliente."""
-    campos, repetidos = {}, []
-    for linha in bloco.splitlines():
-        if ":" in linha:
-            k, _, v = linha.partition(":")
-            k = k.strip().lower()
-            if not re.fullmatch(r"[a-z_]+", k):
-                continue  # "Dos R$ 57.100 de custos" não é nome de campo
-            if k in campos:
-                if k in CAMPOS_CRITICOS and k not in repetidos:
-                    repetidos.append(k)
+    """Um campo geral só é aceito se o campo ANTERIOR na ordem do formulário já
+    apareceu. Uma linha 'lucro: X' escrita dentro do Objetivo chega antes de
+    'custos' e é descartada — sem isso, texto livre sequestrava número crítico e
+    o Motor publicava o valor errado como 'cálculo exato'.
+    Devolve (campos, sequestrados) — o aviso ao cliente precisa dizer a verdade."""
+    linhas = [l for l in bloco.splitlines() if ":" in l]
+    # Quais campos gerais existem NESTE bloco — a exigência é sobre o anterior que
+    # de fato está presente. Sem isso, um bloco parcial rejeita tudo em cascata.
+    presentes = [k for k in ORDEM_CAMPOS_GERAIS
+                 if any(re.fullmatch(r"[a-z_]+", l.partition(":")[0].strip().lower())
+                        and l.partition(":")[0].strip().lower() == k for l in linhas)]
+    anterior_de = {k: (presentes[i - 1] if i > 0 else None) for i, k in enumerate(presentes)}
+
+    campos, sequestrados, vistos, descartados = {}, [], set(), {}
+    for linha in linhas:
+        k, _, v = linha.partition(":")
+        k = k.strip().lower()
+        if not re.fullmatch(r"[a-z_]+", k):
+            continue  # "Dos R$ 57.100 de custos" não é nome de campo
+        if k in _POSICAO:
+            anterior = anterior_de.get(k)
+            fora_de_ordem = anterior is not None and anterior not in vistos
+            if fora_de_ordem or k in campos:
+                if k in CAMPOS_CRITICOS and k not in sequestrados:
+                    sequestrados.append(k)
+                    descartados.setdefault(k, v.strip())
                 continue
-            campos[k] = v.strip()
-    return campos, repetidos
+            vistos.add(k)
+        elif k in campos:
+            continue
+        campos[k] = v.strip()
+    # Rede de segurança: se a ordem do app mudar, um campo pode ser descartado e nunca
+    # reaparecer. Valor descartado é melhor que campo vazio — mas o aviso cai, porque
+    # aí não houve sequestro nenhum, foi a minha regra que errou.
+    for chave, valor in descartados.items():
+        if chave not in campos:
+            campos[chave] = valor
+            sequestrados.remove(chave)
+    return campos, sequestrados
 
 def _pct_sao(*valores, limite=300):
     """Percentual fora desta faixa quase sempre é campo mal preenchido, não negócio.
@@ -302,30 +401,34 @@ def calcular_motor(dados):
         for corte in ("DECISÕES RECOMENDADAS", "=== ANÁLISE ANTERIOR 2", "=== DADOS ATUAIS"):
             if corte in ant_txt:
                 ant_txt = ant_txt.split(corte, 1)[0]
-    atual_bruto, repetidos = _campos_do_bloco(atual_txt)
+    atual_bruto, sequestrados = _campos_do_bloco(atual_txt)
     atual = {k: _num_br(v) for k, v in atual_bruto.items()}
-    ant = {k: _num_br(v) for k, v in _campos_do_bloco(ant_txt)[0].items()} if ant_txt else {}
+    ant_bruto = _campos_do_bloco(ant_txt)[0] if ant_txt else {}
+    ant = {k: _num_br(v) for k, v in ant_bruto.items()}
 
     indicadores, radar = [], []
 
     # AVISO EM VEZ DE CHUTE: campo crítico preenchido que o Motor não conseguiu ler
     # vira linha visível no PDF, com o que o cliente escreveu e como corrigir.
     # Silêncio aqui já custou análise errada entregue como se fosse certa.
+    # Ficam numa lista PRÓPRIA: são recado de preenchimento, não diagnóstico, e entram
+    # DEPOIS da história do negócio — o cliente abria o PDF pago sendo corrigido.
+    avisos = []
     for chave in CAMPOS_CRITICOS:
-        escrito = atual_bruto.get(chave, "").strip()
+        escrito = (atual_bruto.get(chave) or "").strip()
         if escrito and atual.get(chave) is None:
             rotulo = ROTULOS_CAMPOS.get(chave, chave)
-            radar.append(
+            avisos.append(
                 f"🟡 Não consegui ler o campo \"{rotulo}\" com segurança — você escreveu "
-                f"\"{escrito[:60]}\". Escreva só o número (ex.: 38500). "
-                f"Esta análise saiu sem os cálculos que dependem desse campo (leitura)")
-    radar.extend(_conferir_somas_percentuais(atual_bruto))
-    for chave in repetidos:
+                f"\"{_limpar_eco(escrito)}\". Escreva só o número (ex.: 38500). "
+                f"Esta análise saiu sem os cálculos que dependem desse campo")
+    avisos.extend(_conferir_somas_percentuais(atual_bruto))
+    for chave in sequestrados:
         rotulo = ROTULOS_CAMPOS.get(chave, chave)
-        radar.append(
-            f"🟡 O campo \"{rotulo}\" apareceu mais de uma vez nos dados. Usei o valor do "
-            f"formulário. Se você escreveu esse valor de novo dentro das Observações ou dos "
-            f"Desafios, ele foi ignorado (leitura)")
+        avisos.append(
+            f"🟡 Encontrei \"{rotulo}\" escrito também dentro de um campo de texto (Objetivo, "
+            f"Desafios ou Observações). Para o cálculo usei o valor do campo próprio do "
+            f"formulário — o que estava no texto foi ignorado")
     fat = atual.get("faturamento")
     meta = atual.get("meta")
     custos = atual.get("custos")
@@ -453,6 +556,37 @@ def calcular_motor(dados):
         if chave == "faturamento" and not conta_historia:
             band = "🟢" if delta > 0 else ("🟡" if delta >= -5 else "🔴")
             radar.append(f"{band} Faturamento vs análise anterior: {'+' if delta >= 0 else ''}{_fmt_br(delta)}%")
+    # A EVOLUÇÃO DOS CANAIS — "Loja física 65% | WhatsApp 25%" é texto, então nenhum
+    # campo numérico a captura, e o canal que mais cresce ficava invisível. É a única
+    # boa notícia estrutural que os dados da loja traziam e o PDF não citava.
+    canais_a, canais_b = _canais(atual_bruto.get("vendas_canal")), _canais(ant_bruto.get("vendas_canal"))
+    for nome_canal, pct_a in canais_a.items():
+        pct_b = canais_b.get(nome_canal)
+        if pct_b is None or abs(pct_a - pct_b) < 0.5 or not _pct_sao(pct_a, pct_b):
+            continue
+        pontos = pct_a - pct_b
+        indicadores.append(f"Canal {nome_canal}: {_fmt_br(pct_b)}% → {_fmt_br(pct_a)}% das vendas "
+                           f"({'+' if pontos >= 0 else ''}{_fmt_br(pontos)} pontos)")
+
+    # CUSTOS CONTROLÁVEIS — o formulário tem um campo `custos` agregado, mas o lojista
+    # costuma detalhar aluguel/folha/energia nas observações. Somando o que ele nomeou
+    # como fixo, o resto é mercadoria e taxa: é ali que a redução é possível. Sem isto
+    # a única saída do produto era mandar o dono "mapear os custos", que é tarefa, não
+    # decisão — e o Cânone veta entregar tarefa no lugar de decisão.
+    if custos and custos > 0:
+        fixos, achados = _custos_fixos(atual_bruto)
+        if len(achados) >= 3 and 0 < fixos < custos:
+            controlaveis = custos - fixos
+            indicadores.append(
+                f"Composição do custo (pelo que você detalhou): fixos R$ {_fmt_br(fixos)} "
+                f"({', '.join(achados)}) e R$ {_fmt_br(controlaveis)} em mercadoria e taxas, "
+                f"que é a parte onde a redução é possível — {_fmt_br(controlaveis / custos * 100)}% do custo total")
+
+    # Recado de preenchimento entra no fim, e limitado: o Radar é do negócio.
+    if avisos:
+        radar.extend(avisos[:3])
+        if len(avisos) > 3:
+            radar.append(f"🟡 …e mais {len(avisos) - 3} campo(s) a conferir no preenchimento")
     return indicadores, radar
 
 def _normalizar_saida(texto):
@@ -517,8 +651,8 @@ def gerar_analise(dados, segmento, modelo=None):
             "Campo percentual varia em PONTOS, e o cálculo já vem pronto: copie, não converta. "
             "Se um problema aparecer repetido em análises seguidas, nomeie a reincidência "
             "(ex.: 'é a 2ª análise seguida com ruptura do produto campeão'). "
-            "Se uma decisão recomendada aparentemente não foi executada, diga com franqueza e mostre o custo de "
-            "continuar adiando. Se foi executada e deu resultado, reconheça com números."
+            "Fale sempre do RESULTADO, nunca da conduta do dono: diga se a meta foi atingida e o que os números "
+            "mostram, jamais se ele executou ou deixou de executar. Se deu resultado, reconheça com números."
         )
         num += 1
     secoes.append(f"🎯 {num}. DECISÃO MAIS IMPORTANTE AGORA\nUma única decisão crítica e direta."); num += 1
@@ -630,6 +764,8 @@ def gerar_analise(dados, segmento, modelo=None):
 
                 f"📄 FORMATAÇÃO — a saída vai direto para um PDF que não interpreta markdown:\n"
                 f"- Escreva em TEXTO PURO. Proibido '**', '###', '---', '```', tabelas e qualquer marcação.\n"
+                f"- NUNCA numere os itens DENTRO de uma seção ('1.', '2.', '3.'). Só os TÍTULOS das seções levam "
+                f"número. Item de lista começa direto pela palavra. Numerar item quebra o PDF: ele vira título.\n"
                 f"- Cada título de seção começa pelo emoji e pelo número, exatamente como no formato pedido, "
                 f"e a linha do título não leva nenhum outro caractere de marcação.\n"
                 f"- Números no padrão brasileiro: R$ 18.000 (ponto no milhar), 8,5% (vírgula decimal, "
@@ -643,7 +779,7 @@ def gerar_analise(dados, segmento, modelo=None):
                 f"É PROIBIDO calcular percentuais, taxas, somas, divisões, quanto se 'recupera em caixa' ou "
                 f"valores de período anterior que não estejam escritos. Se o número não existe nessas duas fontes, "
                 f"escreva a frase SEM número — descrever bem vale mais que calcular errado.\n"
-                f"- NÚMERO-META (o alvo que VOCÊ está propondo, ex.: 'liquidar a -40%', 'reduzir em 30%'): "
+                f"- NÚMERO-META (o alvo que VOCÊ propõe, ex.: 'zerar o encalhe em 30 dias', 'levar a margem de 8,5% para 10%'): "
                 f"esse você escolhe, e ele é bem-vindo. Nunca apresente número-meta como se fosse resultado apurado.\n"
                 f"Nunca atribua a um fornecedor, canal ou produto uma taxa ou percentual que não esteja nos dados.\n"
                 f"ATENÇÃO — esta regra NÃO manda omitir informação: repetir uma quantidade que já está escrita nos dados "
@@ -657,7 +793,7 @@ def gerar_analise(dados, segmento, modelo=None):
                 f"palavra que ele possa resolver de duas formas diferentes é decisão perdida.\n"
                 f"- PROIBIDO: 'fazer promoções', 'ajustar os preços', 'otimizar o estoque', 'melhorar o atendimento', "
                 f"'revisar os processos', ou qualquer ordem sem alvo nomeado.\n"
-                f"- OBRIGATÓRIO no lugar: 'liquidar o blazer de alfaiataria e a saia longa jeans a -40% nos próximos 15 dias', "
+                f"- OBRIGATÓRIO no lugar: 'criar uma ação de giro para o blazer de alfaiataria e a saia longa jeans nos próximos 15 dias',"
                 f"'subir o preço do vestido midi em 8%', 'responder o WhatsApp até as 20h no sábado'.\n"
                 f"- Ao falar de estoque encalhado, nomeie o item E o tamanho/variação encalhada quando os dados trouxerem "
                 f"(ex.: 'GG e XG'). É o tamanho que corrige a PRÓXIMA COMPRA — sem ele o dono repete o erro.\n"
