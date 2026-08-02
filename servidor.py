@@ -220,8 +220,47 @@ ROTULOS_CAMPOS = {
     "custos": "Investimento/Custos do período", "lucro": "Lucro líquido",
     "ticket_medio": "Ticket médio", "clientes": "Número de clientes atendidos",
     "conversao": "Taxa de conversão", "capacidade": "Capacidade operacional ocupada",
+    "proporcao_loja": "Percentual de vendas: Roupas vs Calçados", "vendas_canal": "Vendas por canal",
+    "mix_categoria": "Mix por categoria", "proporcao": "Proporção informada",
 }
 CAMPOS_CRITICOS = ("faturamento", "meta", "custos", "lucro", "ticket_medio")
+
+# Todo campo numérico que o formulário pede é comparável entre períodos. O tipo
+# manda na conta: percentual varia em PONTOS, dinheiro e quantidade variam em %.
+CAMPOS_COMPARAVEIS = (
+    ("faturamento",  "Faturamento",              "dinheiro"),
+    ("lucro",        "Lucro",                    "dinheiro"),
+    ("custos",       "Custos",                   "dinheiro"),
+    ("ticket_medio", "Ticket médio",             "dinheiro"),
+    ("clientes",     "Clientes atendidos",       "quantidade"),
+    ("funcionarios", "Funcionários",             "quantidade"),
+    ("conversao",    "Taxa de conversão",        "percentual"),
+    ("capacidade",   "Capacidade ocupada",       "percentual"),
+    ("fornecedores", "Fornecedores no prazo",    "percentual"),
+    ("ocupacao",     "Ocupação da agenda",       "percentual"),
+    ("recorrentes",  "Clientes recorrentes",     "quantidade"),
+)
+
+def _conferir_somas_percentuais(brutos):
+    """Campo de rateio ('Roupas 85% | Calçados 20%') que não fecha 100% é erro de
+    preenchimento — e o produto tem de avisar em vez de analisar em cima dele."""
+    avisos = []
+    for chave, texto in brutos.items():
+        if not texto or "%" not in texto:
+            continue
+        partes = re.findall(r"(\d[\d.,]*)\s*%", texto)
+        if len(partes) < 2:
+            continue
+        try:
+            soma = sum(float(p.replace(".", "").replace(",", ".")) for p in partes)
+        except ValueError:
+            continue
+        if not 97 <= soma <= 103:
+            rotulo = ROTULOS_CAMPOS.get(chave, chave.replace("_", " "))
+            avisos.append(
+                f"🟡 Os percentuais do campo \"{rotulo}\" somam {_fmt_br(soma)}%, não 100% — "
+                f"você escreveu \"{texto[:60]}\". Confira antes de usar esta análise (leitura)")
+    return avisos
 
 def _campos_do_bloco(bloco):
     """Primeira ocorrência VENCE. Antes vencia a última, e uma linha 'lucro: 1'
@@ -280,6 +319,7 @@ def calcular_motor(dados):
                 f"🟡 Não consegui ler o campo \"{rotulo}\" com segurança — você escreveu "
                 f"\"{escrito[:60]}\". Escreva só o número (ex.: 38500). "
                 f"Esta análise saiu sem os cálculos que dependem desse campo (leitura)")
+    radar.extend(_conferir_somas_percentuais(atual_bruto))
     for chave in repetidos:
         rotulo = ROTULOS_CAMPOS.get(chave, chave)
         radar.append(
@@ -386,17 +426,33 @@ def calcular_motor(dados):
                 f"Margem líquida vs análise anterior: era {_fmt_br(m_ant)}% e agora é {_fmt_br(m_atual)}% "
                 f"({'+' if pontos >= 0 else ''}{_fmt_br(pontos)} pontos)")
 
-    for chave, nome in (("faturamento", "Faturamento"), ("lucro", "Lucro"), ("ticket_medio", "Ticket médio")):
+    # COMPARAÇÃO DE TODOS OS CAMPOS NUMÉRICOS, não só de três. O Motor comparava
+    # faturamento, lucro e ticket; os outros sete o modelo comparava de cabeça — e
+    # errava (declarou "a capacidade ficou igual" com 65% → 70% nos dados).
+    # Campo percentual se compara em PONTOS, não em porcentagem: 33% → 35% é
+    # +2 pontos, não "+2". A conta é diferente e a leitura também.
+    for chave, nome, tipo in CAMPOS_COMPARAVEIS:
         a, b = atual.get(chave), ant.get(chave)
-        if a is not None and b:
-            delta = (a - b) / abs(b) * 100
-            if not _pct_sao(delta):
-                continue  # campo mal preenchido: cala em vez de imprimir '+5.900%' como fato
-            indicadores.append(f"{nome}: {'+' if delta >= 0 else ''}{_fmt_br(delta)}% vs análise anterior "
-                               f"(de R$ {_fmt_br(b)} para R$ {_fmt_br(a)})")
-            if chave == "faturamento" and not conta_historia:
-                band = "🟢" if delta > 0 else ("🟡" if delta >= -5 else "🔴")
-                radar.append(f"{band} Faturamento vs análise anterior: {'+' if delta >= 0 else ''}{_fmt_br(delta)}%")
+        if a is None or not b:
+            continue
+        if tipo == "percentual":
+            pontos = a - b
+            if not _pct_sao(a, b) or abs(pontos) < 0.1:
+                continue
+            indicadores.append(f"{nome}: {_fmt_br(b)}% → {_fmt_br(a)}% "
+                               f"({'+' if pontos >= 0 else ''}{_fmt_br(pontos)} pontos)")
+            continue
+        delta = (a - b) / abs(b) * 100
+        if not _pct_sao(delta):
+            continue  # campo mal preenchido: cala em vez de imprimir '+5.900%' como fato
+        if delta == 0 and chave not in CAMPOS_CRITICOS:
+            continue  # "Funcionários: 2 → 2" é ruído; "Lucro: igual" não é
+        moeda = "R$ " if tipo == "dinheiro" else ""
+        indicadores.append(f"{nome}: {moeda}{_fmt_br(b)} → {moeda}{_fmt_br(a)} "
+                           f"({'+' if delta >= 0 else ''}{_fmt_br(delta)}%)")
+        if chave == "faturamento" and not conta_historia:
+            band = "🟢" if delta > 0 else ("🟡" if delta >= -5 else "🔴")
+            radar.append(f"{band} Faturamento vs análise anterior: {'+' if delta >= 0 else ''}{_fmt_br(delta)}%")
     return indicadores, radar
 
 def _normalizar_saida(texto):
@@ -456,8 +512,9 @@ def gerar_analise(dados, segmento, modelo=None):
             "sempre com os números lado a lado (use os INDICADORES CALCULADOS quando existirem). "
             "Se a análise anterior tiver seção de METAS, confira meta a meta: cumprida, parcial ou não cumprida — "
             "só quando os campos atuais permitirem conferir; se não permitirem, diga 'não informado desta vez'. "
-            "OBRIGATÓRIO citar também O QUE MELHOROU (clientes atendidos, conversão, ticket médio, canal que cresceu) — "
-            "o dono precisa saber o que está funcionando para não desmontar justamente isso. "
+            "Percorra TODAS as linhas de INDICADORES CALCULADOS que comparam períodos e reporte cada uma, "
+            "inclusive as que MELHORARAM — o dono precisa saber o que está funcionando para não desmontar justamente isso. "
+            "Campo percentual varia em PONTOS, e o cálculo já vem pronto: copie, não converta. "
             "Se um problema aparecer repetido em análises seguidas, nomeie a reincidência "
             "(ex.: 'é a 2ª análise seguida com ruptura do produto campeão'). "
             "Se uma decisão recomendada aparentemente não foi executada, diga com franqueza e mostre o custo de "
@@ -480,11 +537,15 @@ def gerar_analise(dados, segmento, modelo=None):
     ); num += 1
     secoes.append(f"⚠️ {num}. O QUE ESTÁ TE FAZENDO PERDER DINHEIRO\nProblemas claros e acionáveis identificados nos dados."); num += 1
     secoes.append(
-        f"📈 {num}. OPORTUNIDADE MAIS RÁPIDA DE GANHO\n"
-        "Uma ação de retorno rápido e realista. Antes de escolher, olhe o campo de vendas por canal: se um canal já "
-        "responde por fatia relevante do faturamento E os dados apontam fricção nele (demora na resposta, reclamação, "
-        "ausência de atendimento em algum horário), essa costuma ser a oportunidade mais barata que existe — "
-        "o cliente já está lá, só está esbarrando em algo. Não repita a mesma ação da seção de decisão."
+        f"📈 {num}. ONDE ESTÁ A OPORTUNIDADE\n"
+        "Três linhas, uma de cada tipo, nesta ordem — e nenhuma repete a seção de decisão:\n"
+        "• COMERCIAL — vender mais para quem já está chegando. Olhe o canal que cresceu e a fricção declarada "
+        "(demora na resposta, reclamação, horário sem atendimento): o cliente já está lá, só está esbarrando em algo.\n"
+        "• FINANCEIRA — dinheiro parado que volta para o caixa (estoque encalhado, crédito com fornecedor, "
+        "devolução pendente). Diga o valor quando ele estiver nos dados.\n"
+        "• DE MARGEM — reduzir a distância entre o quanto as vendas crescem e o quanto os custos crescem.\n"
+        "Se um dos três não tiver base nos dados, escreva a linha assim: 'sem dado suficiente neste período'. "
+        "Não invente para preencher."
     ); num += 1
     secoes.append(
         f"🚨 {num}. ALERTAS\n"
@@ -550,6 +611,16 @@ def gerar_analise(dados, segmento, modelo=None):
                 f"📅 HOJE É {datetime.now().strftime('%d/%m/%Y')}. Todo prazo que você propuser tem de ser FUTURO "
                 f"em relação a esta data — o período analisado já terminou, e prazo no passado invalida a ação.\n\n"
 
+                f"🎯 FIRME NA DECISÃO, CONSERVADOR NA CONCLUSÃO:\n"
+                f"- A decisão é sua e vai direta. O DIAGNÓSTICO fica do tamanho do dado.\n"
+                f"- PROIBIDO veredito global sobre a empresa ('a saúde do negócio está comprometida', 'a empresa está "
+                f"em risco') quando os números não sustentam. Se a loja vendeu mais, bateu a meta e ainda teve lucro, "
+                f"o que piorou foi a RENTABILIDADE — diga isso, e só isso.\n"
+                f"- PROIBIDO afirmar CAUSA que os dados não isolam. Nunca escreva que algo aconteceu 'por causa' de "
+                f"outra coisa sem prova nos números. Escreva 'pode ter contribuído' e diga o que faltaria para saber.\n"
+                f"- PROIBIDO afirmar que uma decisão anterior não foi executada. Você não sabe. Se os dados mostram o "
+                f"contrário do esperado, diga o RESULTADO ('a meta X não foi atingida'), nunca a conduta do dono.\n\n"
+
                 f"⚖️ NÃO CONTRADIGA O MOTOR, E NÃO INVENTE RÓTULO CONCORRENTE: o resultado do negócio já vem "
                 f"decidido nas linhas calculadas. Se a margem calculada é positiva, HOUVE LUCRO — nunca escreva "
                 f"'prejuízo' nem 'lucro negativo'. Use o mesmo rótulo que o Radar usou ('margem apertada', "
@@ -594,6 +665,13 @@ def gerar_analise(dados, segmento, modelo=None):
                 f"Comparação sempre diz explicitamente o que é comparado com o quê "
                 f"(errado: 'custos subiram 21,7% e o faturamento 13,9%, 1,6x mais rápido'; "
                 f"certo: 'os custos subiram 1,6x mais rápido que o faturamento').\n\n"
+
+                f"💸 NÃO ARBITRE PERCENTUAL DE DESCONTO — o formulário não pergunta custo unitário, quantidade em "
+                f"estoque, preço atual nem há quanto tempo a peça está parada. Sem isso, '-40%' é palpite com cara de "
+                f"decisão. Escreva a AÇÃO com alvo e prazo — 'criar uma ação de giro para o blazer e a saia longa nos "
+                f"próximos 15 dias' — e diga qual dado tornaria possível cravar o percentual. "
+                f"O mesmo vale para meta de corte de custo: só proponha percentual de redução se puder dizer EM QUE "
+                f"linha o corte acontece; senão, a ação é mapear os custos controláveis primeiro.\n\n"
 
                 f"⚖️ AS DUAS ALAVANCAS DE PREÇO SÃO OPOSTAS — NUNCA NA MESMA FRASE:\n"
                 f"- LIQUIDAR o encalhado: sacrifica margem DE PROPÓSITO para recuperar CAIXA. Só vale para item parado.\n"
