@@ -630,12 +630,13 @@ def gerar_analise(dados, segmento, modelo=None):
             "Abra com as linhas do bloco RADAR CALCULADO, EXATAMENTE como fornecidas (não altere bandeiras nem números, "
             "não crie bandeiras numéricas novas). Depois, se os dados sustentarem, acrescente no máximo 2 linhas "
             "qualitativas de radar (🔴/🟡/🟢) sobre pontos NÃO numéricos, terminando cada uma com '(leitura)'. "
-            "Feche com 2 linhas de síntese direta da saúde do negócio."
+            "Feche com 2 linhas dizendo O QUE OS NÚMEROS MOSTRAM — o que melhorou, o que piorou e o que "
+            "isso significa para o caixa. Sem veredito global sobre a empresa."
         ]
     else:
         secoes = [
             "📌 1. DIAGNÓSTICO GERAL\n"
-            "A saúde real do negócio em 2 a 4 linhas diretas: se está saudável, em risco ou em crise, "
+            "O que os números mostram, em 2 a 4 linhas diretas — o que está indo bem e o que está apertando, "
             "citando os números que provam (margem, faturamento vs meta). Sem suavizar e sem dramatizar."
         ]
     num = 2
