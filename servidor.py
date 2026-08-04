@@ -669,19 +669,11 @@ def _normalizar_saida(texto):
 # FASE 2 (04/08, veredito do fundador): CORRIGIR. A observação mediu o que precisava
 # — dois falsos positivos achados e consertados, e a última rodada apontou três
 # defeitos, os três reais. Em observação eles chegavam ao cliente do mesmo jeito.
-# ⚠️ 04/08, fim da manhã: de volta a OBSERVAÇÃO por precaução, com a hipótese de que
-# a falha de ~1s em toda análise era cota da conta Groq — e o modo corrigir DOBRA as
-# chamadas.
-# ✅ 04/08, tarde: CORRIGIR de novo, e a precaução caiu por fato. O serviço voltou
-# sozinho, no mesmo dia, sem ninguém tocar em chave ou plano — cota diária não reseta
-# no meio do dia, limite de taxa reenche. E a precaução atacava a variável errada: o
-# que estourou foi a RAJADA de dezenas de análises por script, não o fator 2. Contra
-# rajada, dividir por dois não é defesa; uso real é 1 ou 2 análises por mês.
-# O que a precaução custava era alto: em observação a violação é detectada e entregue
-# ao cliente assim mesmo — a saída de produção das 15h trazia metas que não fechavam
-# entre si (faturamento 12.000 × margem 35% dá 4.200, e a meta de lucro dizia 3.600),
-# e o validador tinha apontado. Reativar é trocar esta palavra.
-MODO_VALIDADOR = os.environ.get("NEXO_VALIDADOR", "corrigir")      # observacao|corrigir|bloquear
+# ⚠️ 04/08, fim da manhã: de volta a OBSERVAÇÃO por precaução. Toda análise passou a
+# falhar em ~1s, o que aponta para cota/limite da conta Groq — e o modo corrigir
+# DOBRA as chamadas. Voltar a uma chamada por análise reduz o consumo enquanto a
+# causa não é confirmada no painel. Reativar é trocar esta palavra.
+MODO_VALIDADOR = os.environ.get("NEXO_VALIDADOR", "observacao")    # observacao|corrigir|bloquear
 
 FALLBACK_SEGURO = ("Não foi possível gerar esta recomendação com segurança a partir dos dados "
                    "informados. Confira os campos do período e rode a análise novamente.")
