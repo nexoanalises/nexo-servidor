@@ -1244,9 +1244,17 @@ def gerar_analise(dados, segmento, modelo=None):
         "estava certo e obedecendo às mesmas regras do pedido original. Não comente a correção: "
         "devolva só a análise."
     )
-    saida2 = _pedir([{"role": "user", "content": prompt},
-                     {"role": "assistant", "content": saida},
-                     {"role": "user", "content": correcao}])
+    # A correção é uma TENTATIVA DE MELHORA. Se ela falhar por qualquer motivo —
+    # limite de taxa, timeout, indisponibilidade — vale a análise da 1ª tentativa,
+    # que é real e completa. Deixar a exceção subir entregava erro genérico ao
+    # cliente e jogava fora uma análise que existia.
+    try:
+        saida2 = _pedir([{"role": "user", "content": prompt},
+                         {"role": "assistant", "content": saida},
+                         {"role": "user", "content": correcao}])
+    except Exception as e:
+        print(f"VALIDADOR|correcao-falhou|{segmento}|{type(e).__name__}|{e}")
+        return saida
     violacoes2 = validar_saida(saida2, dados, indicadores, radar)
     _registrar("saida-2a-tentativa", segmento, violacoes2, f"modo={MODO_VALIDADOR}")
     if not violacoes2:
