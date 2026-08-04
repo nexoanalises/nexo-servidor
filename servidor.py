@@ -666,7 +666,10 @@ def _normalizar_saida(texto):
 #
 # FASE 1 = OBSERVAÇÃO: registra o que bloquearia e deixa passar. Camada nova não
 # recusa a entrega de um lojista real antes de a taxa de falso positivo ser medida.
-MODO_VALIDADOR = os.environ.get("NEXO_VALIDADOR", "observacao")   # observacao|corrigir|bloquear
+# FASE 2 (04/08, veredito do fundador): CORRIGIR. A observação mediu o que precisava
+# — dois falsos positivos achados e consertados, e a última rodada apontou três
+# defeitos, os três reais. Em observação eles chegavam ao cliente do mesmo jeito.
+MODO_VALIDADOR = os.environ.get("NEXO_VALIDADOR", "corrigir")     # observacao|corrigir|bloquear
 
 FALLBACK_SEGURO = ("Não foi possível gerar esta recomendação com segurança a partir dos dados "
                    "informados. Confira os campos do período e rode a análise novamente.")
