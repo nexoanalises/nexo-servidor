@@ -8,6 +8,7 @@ from datetime import datetime
 from dateutil.relativedelta import relativedelta
 import os
 import json
+import unicodedata
 import requests
 from groq import Groq
 
@@ -269,33 +270,54 @@ ROTULOS_CUSTO_FIXO = (
 )
 
 def _custos_fixos(brutos):
-    """Soma os custos fixos que o cliente nomeou no texto livre. Devolve (soma, rótulos)."""
-    texto = " ".join((brutos.get(c) or "") for c in ("observacoes", "desafios", "custos")).lower()
+    """Soma os custos fixos que o cliente NOMEOU COM VALOR EM REAIS no texto livre.
+    Exige o marcador R$ (ou a palavra 'mil'): sem isso, 'o aluguel vai subir 10%'
+    virava R$ 10 e ia para o PDF sob o selo de cálculo exato. O campo `custos` fica
+    fora da varredura — é o total, e colado no fim contaminava o último rótulo."""
+    texto = " ".join((brutos.get(c) or "") for c in ("observacoes", "desafios")).lower()
     total, achados = 0.0, []
     for rotulo, padrao in ROTULOS_CUSTO_FIXO:
-        m = re.search(r"(?:" + padrao + r")[^0-9r$]{0,25}r?\$?\s*(\d[\d.,]*)", texto)
-        if not m or not m.group(1):
-            continue
-        try:
-            valor = _pct_do_texto(m.group(1))
-        except ValueError:
-            continue
-        if valor > 0:
-            total += valor
+        melhor = 0.0
+        for m in re.finditer(r"(?:" + padrao + r")[^\d%]{0,20}?"
+                             r"(?:r\$\s*(\d[\d.,]*)|\b(\d[\d.,]*)\s*mil\b)(\s*mil\b)?", texto):
+            bruto, em_mil, sufixo_mil = m.group(1), m.group(2), m.group(3)
+            try:
+                if em_mil:
+                    valor = _pct_do_texto(em_mil) * 1000
+                else:
+                    valor = _pct_do_texto(bruto) * (1000 if sufixo_mil else 1)
+            except ValueError:
+                continue
+            melhor = max(melhor, valor)      # 'de 300 para 150' → fica o maior declarado
+        if melhor > 0:
+            total += melhor
             achados.append(rotulo)
     return total, achados
 
 def _canais(texto):
-    """'Loja física 60% | WhatsApp 28%' -> {'Loja física': 60.0, 'WhatsApp': 28.0}"""
+    """'Loja física 60% | WhatsApp 28%' -> {'loja fisica': ('Loja física', 60.0), …}
+    A barra NÃO é separador: as dicas do próprio app trazem 'WhatsApp/tele-entrega' e
+    'Instagram/WhatsApp' dentro do nome. O nome é ancorado no início do pedaço, senão
+    'vendo 70% na loja' vira um canal chamado 'vendo'. A chave é normalizada para o
+    lojista poder escrever 'WhatsApp' num mês e 'whatsapp' no outro."""
     canais = {}
-    for pedaco in re.split(r"[|;/]", texto or ""):
-        m = re.search(r"([A-Za-zÀ-ÿ][A-Za-zÀ-ÿ .]*?)\s*(\d[\d.,]*)\s*%", pedaco)
-        if m:
-            try:
-                canais[m.group(1).strip().rstrip(":")] = _pct_do_texto(m.group(2))
-            except ValueError:
-                pass
-    return canais
+    for pedaco in re.split(r"[|;]", texto or ""):
+        m = re.match(r"\s*([A-Za-zÀ-ÿ][A-Za-zÀ-ÿ /.&-]{1,34}?)\s*:?\s*(\d[\d.,]*)\s*%", pedaco)
+        if not m:
+            continue
+        nome = m.group(1).strip().rstrip(":")
+        chave = re.sub(r"[^a-z]", "", unicodedata.normalize("NFKD", nome.lower())
+                       .encode("ascii", "ignore").decode())
+        if not chave:
+            continue
+        try:
+            canais[chave] = (nome, _pct_do_texto(m.group(2)))
+        except ValueError:
+            pass
+    # Só é rateio de canal se houver pelo menos dois e a soma fechar perto de 100.
+    # 'vendo 70% na loja e 30% online' não é lista de canais — é frase.
+    soma = sum(v[1] for v in canais.values())
+    return canais if len(canais) >= 2 and 90 <= soma <= 110 else {}
 
 def _limpar_eco(texto, limite=45):
     """O aviso repete o que o cliente escreveu. Texto dele vai para dentro de um bloco
@@ -377,6 +399,31 @@ def _campos_do_bloco(bloco):
         if chave not in campos:
             campos[chave] = valor
             sequestrados.remove(chave)
+
+    # O BLOCO CONTÍGUO decide os quatro números que importam. O app escreve
+    # faturamento/meta/custos/lucro em quatro linhas SEGUIDAS, uma por campo. Uma
+    # linha 'lucro: X' digitada dentro de um campo de texto nunca vem seguida de
+    # 'verba_melhorias:'. É a posição no bloco que distingue, não a ordem relativa —
+    # e o Objetivo é vizinho imediato do faturamento, então ordem não basta.
+    seq = ("faturamento", "meta", "custos", "lucro")
+    chaves_por_linha = []
+    for linha in linhas:
+        k = linha.partition(":")[0].strip().lower()
+        chaves_por_linha.append(k if re.fullmatch(r"[a-z_]+", k) else None)
+    # O bloco verdadeiro é o que vem SEGUIDO do campo seguinte do formulário
+    # (verba_melhorias). Um bloco injetado dentro de um texto não tem esse vizinho.
+    candidatos = [i for i in range(len(chaves_por_linha) - 3)
+                  if tuple(chaves_por_linha[i:i + 4]) == seq]
+    real = next((i for i in candidatos
+                 if i + 4 < len(chaves_por_linha) and chaves_por_linha[i + 4] == "verba_melhorias"),
+                candidatos[-1] if candidatos else None)
+    if real is not None:
+        for j, chave in enumerate(seq):
+            valor = linhas[real + j].partition(":")[2].strip()
+            if campos.get(chave) != valor:
+                campos[chave] = valor
+                if chave not in sequestrados:
+                    sequestrados.append(chave)
     return campos, sequestrados
 
 def _pct_sao(*valores, limite=300):
@@ -560,9 +607,11 @@ def calcular_motor(dados):
     # campo numérico a captura, e o canal que mais cresce ficava invisível. É a única
     # boa notícia estrutural que os dados da loja traziam e o PDF não citava.
     canais_a, canais_b = _canais(atual_bruto.get("vendas_canal")), _canais(ant_bruto.get("vendas_canal"))
-    for nome_canal, pct_a in canais_a.items():
-        pct_b = canais_b.get(nome_canal)
-        if pct_b is None or abs(pct_a - pct_b) < 0.5 or not _pct_sao(pct_a, pct_b):
+    for chave, (nome_canal, pct_a) in canais_a.items():
+        if chave not in canais_b:
+            continue
+        pct_b = canais_b[chave][1]
+        if abs(pct_a - pct_b) < 0.5 or not _pct_sao(pct_a, pct_b):
             continue
         pontos = pct_a - pct_b
         indicadores.append(f"Canal {nome_canal}: {_fmt_br(pct_b)}% → {_fmt_br(pct_a)}% das vendas "
@@ -827,8 +876,9 @@ def gerar_analise(dados, segmento, modelo=None):
             "comparação em conhecimento, e é a razão de o histórico existir:\n"
             "  'O que foi recomendado:' a decisão da análise anterior, em uma linha.\n"
             "  'O que aconteceu:' os números que respondem a ela, os que melhoraram E os que pioraram.\n"
-            "  'O que isso ensina:' a lição em uma frase, sobre o MECANISMO — o que a estratégia conseguiu e o "
-            "que ela não protegeu (ex.: 'a estratégia aumentou as vendas, mas não protegeu a rentabilidade').\n"
+            "  'O que isso ensina:' a lição em uma frase, sobre o MECANISMO, falando dos NÚMEROS e nunca da "
+            "estratégia como sujeito que agiu (ex.: 'as vendas subiram e a rentabilidade não acompanhou'). "
+            "Escrever 'a estratégia não foi suficiente' pressupõe que ela foi executada — e isso você não sabe.\n"
             "  'O que muda agora:' como essa lição altera a decisão deste período.\n"
             "Se não houver decisão anterior registrada, escreva 'primeira análise com histórico — sem "
             "recomendação anterior para conferir' e pule as outras três linhas."
@@ -887,6 +937,8 @@ def gerar_analise(dados, segmento, modelo=None):
         "corte de custo — o formulário não tem esses números. Se a decisão do período for sobre estoque, a meta "
         "correspondente é o que o estoque DEVE MOVER: margem, lucro, faturamento ou ticket. "
         "Nada de 'melhorar o atendimento'.\n"
+        "Se este período não trouxer campo numérico suficiente para duas metas, escreva as que der e uma linha: "
+        "'as demais metas dependem de preencher [campo] na próxima análise'. Nunca invente o valor de partida.\n"
         "EXCEÇÃO PARA MULTICANAL: quando o segmento for Multicanal e não existir campo numérico específico para "
         "calcular a meta de uma variável, NÃO invente o valor de partida — use uma das variáveis autorizadas que "
         "estiver disponível (faturamento, lucro, margem, ticket médio). Se nenhuma estiver, não crie meta numérica "
@@ -1042,7 +1094,7 @@ def gerar_analise(dados, segmento, modelo=None):
                 f"custos · quantidade de produtos · quantidade de clientes · participação de produtos · nem qualquer "
                 f"outra variável fora das quatro autorizadas acima.\n"
                 f"Exemplos PROIBIDOS: 'reduzir estoque em 30%' · 'dar 40% de desconto' · 'reduzir custos em 15%' · "
-                f"'vender 20% mais unidades' · 'alcançar R$ 65.000' (alvo sem partida escrita).\n"
+                f"'vender 20% mais unidades' · 'alcançar R$ [valor]' sem escrever de quanto se está partindo.\n"
                 f"Quando não houver dado para calcular ou justificar um percentual, use orientação QUALITATIVA e não "
                 f"invente número — 'criar uma ação de giro para o blazer e a saia longa nos próximos 30 dias, "
                 f"definindo o desconto depois de olhar a margem e o custo dessas peças'.\n"
@@ -1086,7 +1138,9 @@ def gerar_analise(dados, segmento, modelo=None):
                 f"- Nenhum fornecedor, produto, quantidade ou ocorrência atribuído a entidade diferente da que está "
                 f"nos dados.\n"
                 f"- Nenhum número, percentual, meta ou valor que não esteja nos dados, nas linhas calculadas ou "
-                f"autorizado pela REGRA DE PERCENTUAIS. Toda meta traz o valor de partida escrito.\n"
+                f"autorizado pela REGRA DE PERCENTUAIS. Toda meta traz o valor de partida escrito. "
+                f"A tag (Custo: … | Resultado em: …) das Ações Imediatas é estimativa declarada, não afirmação "
+                f"sobre o negócio, e continua OBRIGATÓRIA em todas as ações.\n"
                 f"- Nenhuma afirmação de que uma recomendação anterior foi EXECUTADA, se os dados não confirmam. "
                 f"DIFERENCIE SEMPRE: recomendação feita ≠ ação executada ≠ resultado observado. Escrever 'a estratégia "
                 f"de giro não foi suficiente' já pressupõe que ela foi executada — e você não sabe disso. "
