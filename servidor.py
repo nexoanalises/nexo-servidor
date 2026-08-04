@@ -345,8 +345,10 @@ def _conferir_somas_percentuais(brutos):
         if not 97 <= soma <= 103:
             rotulo = ROTULOS_CAMPOS.get(chave, chave.replace("_", " "))
             avisos.append(
-                f"🟡 Os percentuais do campo \"{rotulo}\" somam {_fmt_br(soma)}%, não 100% — "
-                f"você escreveu \"{texto[:60]}\". Confira antes de usar esta análise")
+                f"🟡 As informações de \"{rotulo}\" NÃO PUDERAM SER AVALIADAS: os percentuais que "
+                f"você escreveu ({_limpar_eco(texto)}) somam {_fmt_br(soma)}%, e precisam somar 100%. "
+                f"Volte ao campo \"{rotulo}\" no formulário, corrija e gere a análise de novo. "
+                f"O restante desta análise não foi afetado")
     return avisos
 
 # O app escreve os campos gerais SEMPRE nesta ordem, um por linha, e escreve todos
@@ -466,16 +468,18 @@ def calcular_motor(dados):
         if escrito and atual.get(chave) is None:
             rotulo = ROTULOS_CAMPOS.get(chave, chave)
             avisos.append(
-                f"🟡 Não consegui ler o campo \"{rotulo}\" com segurança — você escreveu "
-                f"\"{_limpar_eco(escrito)}\". Escreva só o número (ex.: 38500). "
-                f"Esta análise saiu sem os cálculos que dependem desse campo")
+                f"🟡 Os cálculos que dependem de \"{rotulo}\" NÃO PUDERAM SER FEITOS: não consegui "
+                f"ler o valor com segurança, você escreveu \"{_limpar_eco(escrito)}\". "
+                f"Volte ao campo \"{rotulo}\" e escreva só o número (ex.: 38500), sem texto junto. "
+                f"O restante desta análise não foi afetado")
     avisos.extend(_conferir_somas_percentuais(atual_bruto))
     for chave in sequestrados:
         rotulo = ROTULOS_CAMPOS.get(chave, chave)
         avisos.append(
             f"🟡 Encontrei \"{rotulo}\" escrito também dentro de um campo de texto (Objetivo, "
             f"Desafios ou Observações). Para o cálculo usei o valor do campo próprio do "
-            f"formulário — o que estava no texto foi ignorado")
+            f"formulário e ignorei o que estava no texto. Se o valor certo é o outro, volte ao "
+            f"campo \"{rotulo}\" e corrija. O restante desta análise não foi afetado")
     fat = atual.get("faturamento")
     meta = atual.get("meta")
     custos = atual.get("custos")
@@ -650,6 +654,7 @@ def _normalizar_saida(texto):
     # Só dentro da mesma linha, para não colar o valor de uma linha no texto da outra.
     t = re.sub(r"(R\$[ \t]*\d{1,3}(?:[ \t]\d{3})+)",
                lambda m: re.sub(r"[ \t](\d{3})", r".\1", m.group(1)), t)
+    t = _corrigir_vocabulario(t)                                # grafia do que é nosso
     t = re.sub(r"[ \t]+$", "", t, flags=re.M)                   # espaços no fim da linha
     t = re.sub(r"\n{3,}", "\n\n", t)
     return t.strip()
@@ -682,6 +687,43 @@ def _secao_da_saida(saida, titulo):
         if dentro and linha.strip():
             corpo.append(linha.strip())
     return corpo
+
+def _teto_da_verba(dados):
+    """Maior valor que o cliente declarou ter para melhorias. 'entre R$ 1.000 e
+    R$ 2.000' -> 2000. 'não tenho no momento' -> 0. Sem informação -> None."""
+    m = re.search(r"verba_melhorias\s*:\s*(.+)", dados or "", re.I)
+    if not m:
+        return None
+    texto = m.group(1).strip().lower()
+    if not texto:
+        return None
+    if re.search(r"n[ãa]o tenho|nenhum|zero|sem verba", texto):
+        return 0.0
+    valores = []
+    for bruto in re.findall(r"\d[\d.,]*", texto):
+        try:
+            v = _pct_do_texto(bruto)
+        except ValueError:
+            continue
+        valores.append(v * 1000 if re.search(re.escape(bruto) + r"\s*mil\b", texto) else v)
+    return max(valores) if valores else None
+
+# O produto tem vocabulário próprio e curto. O modelo deforma palavra longa em
+# português — saíram 'Reprepecificar', 'Repreprecificar' e 'investedo' em PDFs
+# finais. Conferir a grafia do que é NOSSO é determinístico; o resto não é.
+VOCABULARIO_NEXO = (
+    # 'repre' + qualquer coisa + 'fica' só existe em português como reprecificar.
+    # Pega Reprepecificar, Repreprecificar e o que mais o modelo inventar da família.
+    (r"\b([Rr])epre[a-zà-ÿ]{0,6}fica", r"\1eprecifica"),
+    (r"\binvestedo\b", "investido"),
+    (r"\bliquidiar\b", "liquidar"),
+)
+
+def _corrigir_vocabulario(texto):
+    t = texto or ""
+    for padrao, certo in VOCABULARIO_NEXO:
+        t = re.sub(padrao, certo, t)
+    return t
 
 def _viol(regra, detalhe, trecho="", bloqueia=False, campo=""):
     return {"regra": regra, "detalhe": detalhe, "trecho": trecho[:90],
@@ -734,9 +776,20 @@ def validar_saida(saida, dados, indicadores, radar):
         # do fallback. Falso positivo medido na fase de observação, em 04/08.
         if len(linha) < 12 or not re.search(r"\d", linha):
             continue
-        if not re.search(r"\bde\s+R?\$?\s*[\d.,]+\s*%?\s+para\s+R?\$?\s*[\d.,]+", linha, re.I):
+        # 'de X para Y' e também 'manter em X ou mais', que é meta de defesa legítima
+        # e traz o ponto de partida escrito. Falso positivo medido em 04/08.
+        tem_partida = (re.search(r"\bde\s+R?\$?\s*[\d.,]+\s*%?\s+para\s+R?\$?\s*[\d.,]+", linha, re.I)
+                       or re.search(r"\bmanter\b[^.]{0,40}?R?\$?\s*[\d.,]+\s*%?", linha, re.I))
+        if not tem_partida:
             v.append(_viol("meta sem ponto de partida",
-                           "toda meta escreve o valor atual: 'de [atual] para [alvo]'", linha))
+                           "toda meta escreve o valor atual: 'de [atual] para [alvo]' "
+                           "ou 'manter em [atual] ou mais'", linha))
+        # meta sobre variável que o formulário não mede
+        proibida = re.search(r"\b(estoque|encalh\w+|desconto|custos?)\b", linha, re.I)
+        if proibida and re.search(r"\d+\s*%|\bem\s+\d", linha, re.I):
+            v.append(_viol("meta sobre variável não autorizada",
+                           f"meta sobre '{proibida.group(1).lower()}' não tem ponto de partida no "
+                           f"formulário — use margem, lucro, faturamento ou ticket médio", linha))
 
     # 3 · as metas têm de fechar entre si
     alvo = {}
@@ -761,11 +814,22 @@ def validar_saida(saida, dados, indicadores, radar):
                            f"{_fmt_br(alvo['margem'])}% dá {_fmt_br(esperado)}, mas a meta de "
                            f"lucro é {_fmt_br(alvo['lucro'])}"))
 
-    # 4 · ação sem prazo/custo declarado
+    # 4 · ação sem prazo/custo declarado, e custo fora da verba que o cliente informou
+    teto = _teto_da_verba(dados)
     for linha in _secao_da_saida(saida, "AÇÕES IMEDIATAS"):
         if len(linha) >= 25 and "Resultado em" not in linha:
             v.append(_viol("ação sem prazo", "toda ação termina com (Custo: … | Resultado em: …)",
                            linha))
+        m = re.search(r"Custo:\s*R?\$?\s*([\d.,]+)", linha, re.I)
+        if m and teto is not None:
+            try:
+                custo = _pct_do_texto(m.group(1))
+            except ValueError:
+                custo = None
+            if custo is not None and custo > teto:
+                v.append(_viol("ação acima da verba informada",
+                               f"a ação custa R$ {_fmt_br(custo)} e o cliente informou até "
+                               f"R$ {_fmt_br(teto)} para melhorias", linha))
 
     # 5 · decisão sem ação que a execute
     decisao = " ".join(_secao_da_saida(saida, "DECISÃO MAIS IMPORTANTE"))
