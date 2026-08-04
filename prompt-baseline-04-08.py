@@ -605,159 +605,6 @@ def _normalizar_saida(texto):
     t = re.sub(r"\n{3,}", "\n\n", t)
     return t.strip()
 
-# ─── VALIDADOR — a camada entre a IA e o PDF ────────────────────────────────────
-# Fronteira adotada em 04/08: a IA interpreta e recomenda; o CÓDIGO calcula, valida
-# e controla. Estas funções não analisam nada — só conferem a resposta da IA contra
-# os fatos que o Motor calculou e contra o que o cliente escreveu.
-#
-# FASE 1 = OBSERVAÇÃO: registra o que bloquearia e deixa passar. Camada nova não
-# recusa a entrega de um lojista real antes de a taxa de falso positivo ser medida.
-MODO_VALIDADOR = os.environ.get("NEXO_VALIDADOR", "observacao")   # observacao|corrigir|bloquear
-
-FALLBACK_SEGURO = ("Não foi possível gerar esta recomendação com segurança a partir dos dados "
-                   "informados. Confira os campos do período e rode a análise novamente.")
-
-_RE_NUM = re.compile(r"\d[\d.]*(?:,\d+)?")
-
-def _numeros_de(texto):
-    return {m.group().replace(".", "") for m in _RE_NUM.finditer(texto or "")}
-
-def _secao_da_saida(saida, titulo):
-    """Corpo de uma seção da resposta, localizada pelo título numerado."""
-    dentro, corpo = False, []
-    for linha in (saida or "").split("\n"):
-        limpa = re.sub(r"^[^\w\d]*", "", linha).strip()
-        if re.match(r"^\d+\.\s", limpa):
-            dentro = titulo.lower() in limpa.lower()
-            continue
-        if dentro and linha.strip():
-            corpo.append(linha.strip())
-    return corpo
-
-def _viol(regra, detalhe, trecho="", bloqueia=False, campo=""):
-    return {"regra": regra, "detalhe": detalhe, "trecho": trecho[:90],
-            "bloqueia": bloqueia, "campo": campo}
-
-def validar_entrada(atual, brutos):
-    """🔴 BLOQUEIO DE ENTRADA — erro do cliente, detectado ANTES de chamar a IA.
-    Bloqueia só o IMPOSSÍVEL; o meramente suspeito vira aviso no Radar e a análise
-    segue. Lojista que separa custo de mercadoria de despesa não pode ser barrado."""
-    v, fat = [], atual.get("faturamento")
-    custos, lucro = atual.get("custos"), atual.get("lucro")
-    if fat and fat > 0 and lucro is not None and lucro > fat:
-        v.append(_viol("lucro maior que faturamento",
-                       f"o lucro informado (R$ {_fmt_br(lucro)}) é maior que o faturamento do "
-                       f"período (R$ {_fmt_br(fat)}). Não é possível sobrar mais do que entrou",
-                       bloqueia=True, campo="Lucro líquido"))
-    if custos and custos > 0 and fat and fat > 0 and custos > 5 * fat:
-        v.append(_viol("custos desproporcionais",
-                       f"os custos informados (R$ {_fmt_br(custos)}) são mais de cinco vezes o "
-                       f"faturamento (R$ {_fmt_br(fat)}). Confira se digitou o valor certo",
-                       bloqueia=True, campo="Investimento/Custos do período"))
-    # Suspeito, não impossível: a divergência já vira aviso 🟡 no Radar (Motor).
-    if fat and fat > 0 and custos and custos > 0 and lucro is not None:
-        esperado = fat - custos
-        if abs(esperado - lucro) > 0.25 * fat:
-            v.append(_viol("lucro diverge de faturamento menos custos",
-                           f"faturamento menos custos dá R$ {_fmt_br(esperado)}, mas o lucro "
-                           f"informado é R$ {_fmt_br(lucro)}", bloqueia=False, campo="Lucro líquido"))
-    return v
-
-def validar_saida(saida, dados, indicadores, radar):
-    """🟠 BLOQUEIO DE SAÍDA — os dados estavam certos e a IA produziu algo inválido."""
-    v = []
-    permitidos = _numeros_de(dados) | _numeros_de("\n".join(indicadores)) | _numeros_de("\n".join(radar))
-    permitidos |= {str(n) for n in range(0, 101)}          # prazo, quantidade de item, %
-    metas = set(_secao_da_saida(saida, "METAS"))
-
-    # 1 · número sem fonte (a seção de METAS é alvo proposto, tratada abaixo)
-    for linha in (saida or "").split("\n"):
-        if re.match(r"^[^\w\d]*\d+\.\s", linha) or linha.strip() in metas:
-            continue
-        for n in _numeros_de(linha):
-            if n not in permitidos and len(n.replace(",", "")) >= 3:
-                v.append(_viol("número sem fonte", f"o valor {n} não está nos dados nem nas "
-                               f"linhas calculadas", linha))
-
-    # 2 · meta sem ponto de partida escrito
-    for linha in metas:
-        if len(linha) < 12 or linha.lower().startswith(("é importante", "rodar", "vamos",
-                                                        "verificar", "as demais")):
-            continue
-        if not re.search(r"\bde\s+R?\$?\s*[\d.,]+\s*%?\s+para\s+R?\$?\s*[\d.,]+", linha, re.I):
-            v.append(_viol("meta sem ponto de partida",
-                           "toda meta escreve o valor atual: 'de [atual] para [alvo]'", linha))
-
-    # 3 · as metas têm de fechar entre si
-    alvo = {}
-    for linha in metas:
-        m = re.search(r"para\s+R?\$?\s*([\d.,]+)\s*(%?)", linha, re.I)
-        if not m:
-            continue
-        try:
-            valor = float(m.group(1).replace(".", "").replace(",", "."))
-        except ValueError:
-            continue
-        chave = ("margem" if m.group(2) == "%" else
-                 "faturamento" if "fatura" in linha.lower() else
-                 "lucro" if "lucro" in linha.lower() else None)
-        if chave:
-            alvo[chave] = valor
-    if {"faturamento", "margem", "lucro"} <= set(alvo):
-        esperado = alvo["faturamento"] * alvo["margem"] / 100
-        if abs(esperado - alvo["lucro"]) > max(0.02 * alvo["lucro"], 50):
-            v.append(_viol("metas não fecham entre si",
-                           f"faturamento {_fmt_br(alvo['faturamento'])} × margem "
-                           f"{_fmt_br(alvo['margem'])}% dá {_fmt_br(esperado)}, mas a meta de "
-                           f"lucro é {_fmt_br(alvo['lucro'])}"))
-
-    # 4 · ação sem prazo/custo declarado
-    for linha in _secao_da_saida(saida, "AÇÕES IMEDIATAS"):
-        if len(linha) >= 25 and "Resultado em" not in linha:
-            v.append(_viol("ação sem prazo", "toda ação termina com (Custo: … | Resultado em: …)",
-                           linha))
-
-    # 5 · decisão sem ação que a execute
-    decisao = " ".join(_secao_da_saida(saida, "DECISÃO MAIS IMPORTANTE"))
-    acoes = " ".join(_secao_da_saida(saida, "AÇÕES IMEDIATAS")).lower()
-    if decisao and acoes:
-        genericas = {"produtos", "estoque", "porque", "dessas", "depois", "aumentar", "custos",
-                     "margem", "vendas", "proximos", "próximos", "analise", "análise", "periodo",
-                     "período", "importante", "decisao", "decisão", "agora", "nesta", "sobre"}
-        chaves = {p for p in re.findall(r"[a-zà-ÿ]{5,}", decisao.lower()) if p not in genericas}
-        if chaves and sum(1 for p in chaves if p in acoes) / len(chaves) < 0.25:
-            v.append(_viol("decisão sem ação correspondente",
-                           "nenhuma das ações imediatas executa a decisão principal", decisao))
-
-    # 6 · comparação inconsistente ('de X para Y (+Z%)' com Z que não bate)
-    for m in re.finditer(r"R?\$?\s*([\d.]+(?:,\d+)?)\s*(?:→|para)\s*R?\$?\s*([\d.]+(?:,\d+)?)"
-                         r"[^()\n]{0,25}\(\s*([+-]?[\d,]+)\s*%", saida or ""):
-        try:
-            a = float(m.group(1).replace(".", "").replace(",", "."))
-            b = float(m.group(2).replace(".", "").replace(",", "."))
-            z = float(m.group(3).replace(",", "."))
-        except ValueError:
-            continue
-        if a and abs((b - a) / abs(a) * 100 - z) > 0.6:
-            v.append(_viol("comparação inconsistente",
-                           f"{m.group(1)} → {m.group(2)} dá {(b - a) / abs(a) * 100:.1f}%, "
-                           f"não {m.group(3)}%", m.group(0)))
-    return v
-
-def _registrar(fase, segmento, violacoes, extra=""):
-    """Log estruturado da fase de observação — é o dado que decide quando ativar o
-    bloqueio, e qual regra ainda dá falso positivo."""
-    if not violacoes:
-        print(f"VALIDADOR|{fase}|{segmento}|ok|0|{extra}")
-        return
-    for x in violacoes:
-        print(f"VALIDADOR|{fase}|{segmento}|{x['regra']}|{x['detalhe']}|{x['trecho']}|{extra}")
-
-def _texto_das_violacoes(violacoes):
-    linhas = [f"- {x['regra'].upper()}: {x['detalhe']}" +
-              (f"  (na linha: «{x['trecho']}»)" if x["trecho"] else "") for x in violacoes]
-    return "\n".join(linhas)
-
 def gerar_analise(dados, segmento, modelo=None):
     modos = {
         "Loja / Varejo e Moda": "🟢 MODO GIRO — foco em estoque, giro de produtos, preço, promoção e vendas rápidas.",
@@ -916,7 +763,11 @@ def gerar_analise(dados, segmento, modelo=None):
         bloco_motor += "\n"
 
     modelo_usado = modelo if isinstance(modelo, str) and modelo in MODELOS_PERMITIDOS else MODELO_PADRAO
-    prompt = (
+    resposta = groq_client.chat.completions.create(
+        model=modelo_usado,
+        messages=[{
+            "role": "user",
+            "content": (
                 f"Você é o NEXO Análise. Slogan: Transformando dados em decisões.\n\n"
 
                 f"⚖️ HIERARQUIA DE REGRAS — leia antes de tudo.\n"
@@ -1097,42 +948,10 @@ def gerar_analise(dados, segmento, modelo=None):
                 f"REGRA FINAL DE QUALIDADE: se a resposta não terminar com uma decisão clara e executável, a resposta é inválida.\n\n"
                 f"{bloco_motor}"
                 f"DADOS DO NEGÓCIO:\n{dados}"
+            )
+        }]
     )
-
-    def _pedir(mensagens):
-        r = groq_client.chat.completions.create(model=modelo_usado, messages=mensagens)
-        return _normalizar_saida(r.choices[0].message.content)
-
-    saida = _pedir([{"role": "user", "content": prompt}])
-    violacoes = validar_saida(saida, dados, indicadores, radar)
-    _registrar("saida-1a-tentativa", segmento, violacoes, f"modo={MODO_VALIDADOR}")
-
-    # FASE 1 — OBSERVAÇÃO: registra o que bloquearia e entrega a análise assim mesmo.
-    if MODO_VALIDADOR == "observacao" or not violacoes:
-        return saida
-
-    # CAMINHO 2 — devolver os erros específicos à IA e pedir a correção.
-    correcao = (
-        "A resposta que você acabou de gerar foi reprovada pela validação automática do NEXO. "
-        "Os problemas abaixo são objetivos — foram apurados em cálculo, não em opinião:\n\n"
-        f"{_texto_das_violacoes(violacoes)}\n\n"
-        "Reescreva a análise INTEIRA corrigindo exatamente esses pontos, mantendo tudo o que "
-        "estava certo e obedecendo às mesmas regras do pedido original. Não comente a correção: "
-        "devolva só a análise."
-    )
-    saida2 = _pedir([{"role": "user", "content": prompt},
-                     {"role": "assistant", "content": saida},
-                     {"role": "user", "content": correcao}])
-    violacoes2 = validar_saida(saida2, dados, indicadores, radar)
-    _registrar("saida-2a-tentativa", segmento, violacoes2, f"modo={MODO_VALIDADOR}")
-    if not violacoes2:
-        return saida2
-
-    # FALLBACK CONTROLADO — não se mutila o PDF removendo linhas: uma análise sem
-    # decisão, sem meta ou sem ação fica semanticamente quebrada. Devolve-se um
-    # estado declarado, que preserva a promessa do produto.
-    _registrar("fallback", segmento, violacoes2, f"modo={MODO_VALIDADOR}")
-    return FALLBACK_SEGURO
+    return _normalizar_saida(resposta.choices[0].message.content)
 
 @app.route("/analisar", methods=["POST"])
 def analisar():
@@ -1157,25 +976,6 @@ def analisar():
 
         if not dados or not segmento:
             return jsonify({"status": "erro", "motivo": "Dados incompletos."}), 400
-
-        # 🔴 BLOQUEIO DE ENTRADA — erro do cliente se resolve antes de gastar a IA.
-        # Só barra o aritmeticamente impossível; o suspeito segue e vira aviso no Radar.
-        bloco_atual = dados.split("=== DADOS ATUAIS ===", 1)[-1]
-        brutos_atual = _campos_do_bloco(bloco_atual)[0]
-        numeros_atual = {k: _num_br(v) for k, v in brutos_atual.items()}
-        entrada = validar_entrada(numeros_atual, brutos_atual)
-        _registrar("entrada", segmento, entrada, f"modo={MODO_VALIDADOR}")
-        impedem = [x for x in entrada if x["bloqueia"]]
-        if impedem:
-            campos = " · ".join(sorted({x["campo"] for x in impedem if x["campo"]}))
-            return jsonify({
-                "status": "erro",
-                "motivo": ("DADO INCONSISTENTE — a análise não foi gerada.\n\n"
-                           + "\n".join(f"• {x['detalhe']}." for x in impedem)
-                           + f"\n\nCorrija {campos or 'os campos indicados'} e gere a análise "
-                             "novamente."),
-                "campos": [x["campo"] for x in impedem if x["campo"]],
-            }), 400
 
         # A versão completa exige licença válida; a demo é liberada (limitada no próprio app)
         if modo == "completo":
