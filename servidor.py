@@ -730,8 +730,9 @@ def validar_saida(saida, dados, indicadores, radar):
 
     # 2 · meta sem ponto de partida escrito
     for linha in metas:
-        if len(linha) < 12 or linha.lower().startswith(("é importante", "rodar", "vamos",
-                                                        "verificar", "as demais")):
+        # Linha sem número não é meta — é o convite de fechamento da seção ou a linha
+        # do fallback. Falso positivo medido na fase de observação, em 04/08.
+        if len(linha) < 12 or not re.search(r"\d", linha):
             continue
         if not re.search(r"\bde\s+R?\$?\s*[\d.,]+\s*%?\s+para\s+R?\$?\s*[\d.,]+", linha, re.I):
             v.append(_viol("meta sem ponto de partida",
