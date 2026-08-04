@@ -669,7 +669,11 @@ def _normalizar_saida(texto):
 # FASE 2 (04/08, veredito do fundador): CORRIGIR. A observação mediu o que precisava
 # — dois falsos positivos achados e consertados, e a última rodada apontou três
 # defeitos, os três reais. Em observação eles chegavam ao cliente do mesmo jeito.
-MODO_VALIDADOR = os.environ.get("NEXO_VALIDADOR", "corrigir")     # observacao|corrigir|bloquear
+# ⚠️ 04/08, fim da manhã: de volta a OBSERVAÇÃO por precaução. Toda análise passou a
+# falhar em ~1s, o que aponta para cota/limite da conta Groq — e o modo corrigir
+# DOBRA as chamadas. Voltar a uma chamada por análise reduz o consumo enquanto a
+# causa não é confirmada no painel. Reativar é trocar esta palavra.
+MODO_VALIDADOR = os.environ.get("NEXO_VALIDADOR", "observacao")    # observacao|corrigir|bloquear
 
 FALLBACK_SEGURO = ("Não foi possível gerar esta recomendação com segurança a partir dos dados "
                    "informados. Confira os campos do período e rode a análise novamente.")
@@ -1321,9 +1325,17 @@ def analisar():
         # Detalhe técnico fica no log do servidor; o cliente não vê mensagem interna
         # do Python na tela (o app exibe este 'motivo' direto pro lojista).
         print(f"ERRO no /analisar: {type(e).__name__}: {e}")
-        return jsonify({"status": "erro",
-                        "motivo": "Não foi possível gerar a análise agora. "
-                                  "Tente novamente em instantes."}), 200
+        # Falha do serviço de IA ≠ falha da análise. Dizer qual é ajuda o lojista a
+        # saber que não é problema no que ele preencheu — e ajuda a diagnosticar.
+        texto = f"{type(e).__name__}: {e}".lower()
+        if any(x in texto for x in ("rate", "quota", "limit", "429", "insufficient",
+                                    "unauthor", "401", "api key", "connection", "timeout")):
+            motivo = ("O serviço de análise está temporariamente indisponível. "
+                      "Seus dados estão certos — tente novamente em alguns minutos.")
+        else:
+            motivo = ("Não foi possível gerar a análise agora. "
+                      "Tente novamente em instantes.")
+        return jsonify({"status": "erro", "motivo": motivo}), 200
 
 # ─── WEBHOOK ────────────────────────────────────────────────────────────────────
 
