@@ -529,6 +529,39 @@ def _linha_estruturada(t):
         return {"texto": t.lstrip("• ").strip(), "bandeira": None, "tipo": "bullet"}
     return {"texto": t, "bandeira": None, "tipo": "corrida"}
 
+def _parece_titulo(t):
+    """Título de seção é MAIORITARIAMENTE maiúsculo — não integralmente.
+
+    Exigir o título inteiro em maiúsculas derrubava a seção por um parêntese:
+    'METAS ATÉ A PRÓXIMA ANÁLISE (2 a 3 metas)' não era reconhecida, a
+    substituição falhava e a meta INVENTADA pelo modelo ia ao cliente.
+    E olhar só a primeira palavra derrubava '5. O QUE ESTÁ TE FAZENDO PERDER
+    DINHEIRO', que abre com uma letra só — defeito medido antes de subir.
+    A proporção resolve os dois e continua recusando linha de ação numerada
+    ('1. Definir o preço de saída', 1 maiúscula em 28 letras)."""
+    letras = [c for c in (t or "") if c.isalpha()]
+    if len(letras) < 3:
+        return False
+    maiusculas = sum(1 for c in letras if c.isupper())
+    return maiusculas >= 3 and maiusculas / len(letras) >= 0.6
+
+def _garantir_secao(secoes, chave, titulo, linhas):
+    """Substitui a seção pelo texto do código — e se o cabeçalho do modelo não
+    permitiu encontrá-la, ACRESCENTA em vez de desistir.
+
+    🔴 Por que a segunda metade existe: sem ela, a garantia de que o Radar e as
+    Metas saem do código dependia de o modelo ter escrito o cabeçalho do jeito
+    esperado naquele dia. Falhou o casamento, publicava-se a versão do modelo —
+    exatamente o defeito que a estrutura veio matar, e em silêncio."""
+    if not linhas:
+        return "sem-dado"
+    if _substituir_secao(secoes, chave, linhas):
+        return "codigo"
+    n = max([s["n"] for s in secoes if s.get("n")] or [0]) + 1
+    secoes.append({"n": n, "titulo": titulo, "origem": "codigo",
+                   "linhas": [_linha_estruturada(l) for l in linhas]})
+    return "acrescentada"
+
 def _em_secoes(texto):
     """O ÚNICO ponto em que prosa vira estrutura.
     Título de seção é MAIÚSCULO — sem isso, uma ação numerada ('1. Definir o preço
@@ -536,7 +569,14 @@ def _em_secoes(texto):
     secoes, atual, preambulo = [], None, []
     for linha in (texto or "").split("\n"):
         m = _RE_TITULO_SECAO.match(linha)
-        if m and m.group(2).strip() == m.group(2).strip().upper():
+        # A PRIMEIRA PALAVRA em maiúsculas basta. Exigir o título INTEIRO maiúsculo
+        # derrubava a seção por um parêntese: "8. METAS ATÉ A PRÓXIMA ANÁLISE
+        # (2 a 3 metas)" não era reconhecida, a substituição falhava, e a meta
+        # INVENTADA pelo modelo ia ao cliente. Medido em 05/08: 3 de 4 variações
+        # de cabeçalho quebravam. E "1. Definir o preço de saída" continua sendo
+        # recusada, que é o falso positivo que o teste de maiúsculas existia para
+        # evitar.
+        if m and _parece_titulo(m.group(2)):
             atual = {"n": int(m.group(1)), "titulo": m.group(2).strip(),
                      "origem": "modelo", "linhas": []}
             secoes.append(atual)
@@ -618,8 +658,9 @@ def _bloco_metas(dados):
         return []
     # Redação escolhida pelo fundador em 05/08: o produto afirma o que faz, não se
     # defende do que não faz.
-    linhas += ["", "As metas foram definidas apenas a partir dos dados informados e dos "
-                   "cálculos realizados nesta análise."]
+    # Sem a string vazia: ela virava um <li> vazio no HTML do app.
+    linhas.append("As metas foram definidas apenas a partir dos dados informados e dos "
+                  "cálculos realizados nesta análise.")
     return linhas
 
 def calcular_motor(dados):
@@ -1495,8 +1536,9 @@ def gerar_analise(dados, segmento, modelo=None):
         Devolve (texto, secoes): o texto para a 1.0.2.0 instalada, a estrutura para o
         app novo renderizar em HTML sem re-parsear nada."""
         secoes = _em_secoes(s)
-        ok_radar = _substituir_secao(secoes, "RADAR", list(radar))
-        ok_metas = _substituir_secao(secoes, "METAS", _bloco_metas(dados))
+        ok_radar = _garantir_secao(secoes, "RADAR", "RADAR DO NEGÓCIO", list(radar))
+        ok_metas = _garantir_secao(secoes, "METAS", "METAS ATÉ A PRÓXIMA ANÁLISE",
+                                   _bloco_metas(dados))
 
         # O degrau 3 não pode depender de o modelo acertar a seção: em 05/08 ele pôs
         # a frase no Radar, e a substituição do Radar a levou junto. Agora ela é
@@ -1509,8 +1551,8 @@ def gerar_analise(dados, segmento, modelo=None):
                         sec["linhas"].append(_linha_estruturada(FRASE_ESTOQUE_SEM_VALOR))
                     break
 
-        print(f"PUBLICACAO|{segmento}|radar={'codigo' if ok_radar else 'modelo'}|"
-              f"metas={'codigo' if ok_metas else 'modelo'}|secoes={len(secoes)}")
+        print(f"PUBLICACAO|{segmento}|radar={ok_radar}|metas={ok_metas}|"
+              f"secoes={len(secoes)}")
         return _texto_de_secoes(secoes), secoes
 
     saida = _pedir([{"role": "user", "content": prompt}])
@@ -1563,8 +1605,8 @@ def gerar_analise(dados, segmento, modelo=None):
     # UMA FRASE no lugar da análise, com o Motor tendo calculado tudo direito.
     # Melhor entregar o que se garante e declarar o que faltou, do que entregar nada.
     secoes = _em_secoes(saida2)
-    _substituir_secao(secoes, "RADAR", list(radar))
-    _substituir_secao(secoes, "METAS", _bloco_metas(dados))
+    _garantir_secao(secoes, "RADAR", "RADAR DO NEGÓCIO", list(radar))
+    _garantir_secao(secoes, "METAS", "METAS ATÉ A PRÓXIMA ANÁLISE", _bloco_metas(dados))
     apuradas = [s for s in secoes if s["origem"] == "codigo"]
     if not apuradas:
         return FALLBACK_SEGURO, []
