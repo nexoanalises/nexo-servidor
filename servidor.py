@@ -494,6 +494,88 @@ def _fmt_br(v, dec=1):
     s = f"{v:,.{dec}f}".replace(",", "X").replace(".", ",").replace("X", ".")
     return s[:-2] if s.endswith(",0") else s
 
+def _fmt_rs(v):
+    """Dinheiro: centavos só quando existem. Uma regra de arredondamento, num lugar
+    só — é o que impede a mesma grandeza de sair '16,77' numa seção e '16,8' na
+    outra, que foi o defeito do PDF de agosto."""
+    s = _fmt_br(v, 2)
+    return s[:-3] if s.endswith(",00") else s
+
+def _atuais(dados):
+    """Números do período ATUAL, com a mesma leitura que o Motor usa. Existe para as
+    seções escritas por código não dependerem de reparsear nada por conta própria."""
+    txt = dados.split("=== DADOS ATUAIS ===", 1)[1] if "=== DADOS ATUAIS ===" in dados else dados
+    return {k: _num_br(v) for k, v in _campos_do_bloco(txt)[0].items()}
+
+def _trocar_secao(saida, titulo, corpo):
+    """Troca o CORPO de uma seção da resposta pelo texto que o CÓDIGO produziu.
+    O cabeçalho do modelo fica (ele numera as seções dinamicamente); o miolo é
+    substituído. É isto que torna a publicação garantida em vez de pedida: o modelo
+    deixa de ser quem digita o número, e obedecer vira irrelevante."""
+    if not corpo:
+        return saida, False
+    saiu, dentro, trocou = [], False, False
+    for linha in (saida or "").split("\n"):
+        limpa = re.sub(r"^[^\w\d]*", "", linha).strip()
+        if re.match(r"^\d+\.\s", limpa):
+            dentro = False
+            saiu.append(linha)
+            if not trocou and titulo.lower() in limpa.lower():
+                saiu.extend(corpo)
+                saiu.append("")
+                dentro = trocou = True
+            continue
+        if not dentro:
+            saiu.append(linha)
+    return "\n".join(saiu), trocou
+
+def _bloco_metas(dados):
+    """§8 ESCRITA POR CÓDIGO — mata o alvo arbitrado.
+    Em produção, 05/08, o modelo inventou 'de R$ 54.800 para R$ 62.500' e ignorou a
+    meta de R$ 55.000 que o cliente havia informado. Números redondos escolhidos por
+    quem não tem de onde tirá-los.
+    A regra passa a ser: alvo ou VEM DO CLIENTE, ou é CONTA declarada, ou a meta é
+    DEFENDER o que já foi conquistado. Meta que nasce de conta diz que nasceu."""
+    a = _atuais(dados)
+    fat, meta, lucro = a.get("faturamento"), a.get("meta"), a.get("lucro")
+    linhas = []
+    margem = (lucro / fat * 100) if (fat and fat > 0 and lucro is not None) else None
+    if margem is not None and not _pct_sao(margem):
+        margem = None
+
+    if fat and fat > 0:
+        if meta and meta > fat:
+            linhas.append(f"• Faturamento: de R$ {_fmt_rs(fat)} para R$ {_fmt_rs(meta)} "
+                          f"— a meta que você definiu.")
+        elif meta and meta > 0:
+            linhas.append(f"• Faturamento: manter em R$ {_fmt_rs(fat)} ou mais — você já "
+                          f"superou a meta de R$ {_fmt_rs(meta)} que definiu para o período.")
+        else:
+            linhas.append(f"• Faturamento: manter em R$ {_fmt_rs(fat)} ou mais. "
+                          f"Você não informou meta de faturamento nesta análise.")
+    if margem is not None:
+        linhas.append(f"• Margem líquida: manter em {_fmt_br(margem)}% ou mais.")
+
+    # Lucro NÃO é alvo novo: é o que o faturamento-alvo dá com a margem de hoje.
+    alvo_fat = meta if (meta and fat and meta > fat) else fat
+    if alvo_fat and margem is not None and lucro is not None:
+        linhas.append(f"• Lucro: de R$ {_fmt_rs(lucro)} para R$ {_fmt_rs(alvo_fat * margem / 100)} "
+                      f"— meta sugerida pelo NEXO, calculada com o faturamento acima e a "
+                      f"margem de hoje.")
+
+    v_est = _valor_do_estoque(dados)[0]
+    if v_est:
+        linhas.append(f"• Estoque parado: de R$ {_fmt_rs(v_est)} para menos da metade "
+                      f"— meta sugerida pelo NEXO com base no estoque que você informou.")
+
+    if not linhas:
+        return []
+    # Redação escolhida pelo fundador em 05/08: o produto afirma o que faz, não se
+    # defende do que não faz.
+    linhas += ["", "As metas foram definidas apenas a partir dos dados informados e dos "
+                   "cálculos realizados nesta análise."]
+    return linhas
+
 def calcular_motor(dados):
     """Retorna (indicadores, radar): listas de linhas calculadas dos dados.
     Listas vazias se nada foi parseável — o prompt então cai no modo antigo."""
@@ -1358,6 +1440,18 @@ def gerar_analise(dados, segmento, modelo=None):
         r = groq_client.chat.completions.create(model=modelo_usado, messages=mensagens)
         return _normalizar_saida(r.choices[0].message.content)
 
+    def _entregar(s):
+        """O QUE O CÓDIGO CALCULA, O CÓDIGO PUBLICA (#083). O Radar e as Metas saem
+        daqui, não da caneta do modelo — o que ele escreveu nessas duas seções é
+        descartado. Instrução de prompt já não bastava: 'reproduza exatamente como
+        está' estava escrito e o PDF de agosto saiu com 16,8% onde o Motor calculou
+        16,77%. Aqui não há o que obedecer."""
+        s, ok_radar = _trocar_secao(s, "RADAR DO NEGÓCIO", [f"{r}" for r in radar])
+        s, ok_metas = _trocar_secao(s, "METAS", _bloco_metas(dados))
+        print(f"PUBLICACAO|{segmento}|radar={'codigo' if ok_radar else 'modelo'}|"
+              f"metas={'codigo' if ok_metas else 'modelo'}")
+        return s
+
     saida = _pedir([{"role": "user", "content": prompt}])
     violacoes = validar_saida(saida, dados, indicadores, radar)
     _registrar("saida-1a-tentativa", segmento, violacoes, f"modo={MODO_VALIDADOR}")
@@ -1367,7 +1461,7 @@ def gerar_analise(dados, segmento, modelo=None):
 
     # FASE 1 — OBSERVAÇÃO: registra o que bloquearia e entrega a análise assim mesmo.
     if MODO_VALIDADOR == "observacao" or not ativas:
-        return saida
+        return _entregar(saida)
 
     # CAMINHO 2 — devolver os erros específicos à IA e pedir a correção.
     correcao = (
@@ -1388,11 +1482,11 @@ def gerar_analise(dados, segmento, modelo=None):
                          {"role": "user", "content": correcao}])
     except Exception as e:
         print(f"VALIDADOR|correcao-falhou|{segmento}|{type(e).__name__}|{e}")
-        return saida
+        return _entregar(saida)
     violacoes2 = validar_saida(saida2, dados, indicadores, radar)
     _registrar("saida-2a-tentativa", segmento, violacoes2, f"modo={MODO_VALIDADOR}")
     if not [x for x in violacoes2 if not x.get("observa")]:
-        return saida2
+        return _entregar(saida2)
 
     # FALLBACK CONTROLADO — não se mutila o PDF removendo linhas: uma análise sem
     # decisão, sem meta ou sem ação fica semanticamente quebrada. Devolve-se um
@@ -1607,7 +1701,12 @@ def optin():
 
 @app.route("/", methods=["GET"])
 def home():
-    return "Nexo Servidor ativo.", 200
+    # O commit no ar. Sem isto, conferir se um deploy fechou custava UMA ANÁLISE
+    # (~6.299 tokens de um teto diário compartilhado com cliente pagante), porque a
+    # única prova de que o código novo subiu era o comportamento novo aparecer.
+    # Agora custa zero. O Railway injeta esta variável em cada build.
+    sha = (os.environ.get("RAILWAY_GIT_COMMIT_SHA") or "desconhecido")[:7]
+    return f"Nexo Servidor ativo. build={sha}", 200
 
 # ─── INÍCIO ─────────────────────────────────────────────────────────────────────
 
