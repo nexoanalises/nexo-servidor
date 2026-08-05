@@ -507,27 +507,73 @@ def _atuais(dados):
     txt = dados.split("=== DADOS ATUAIS ===", 1)[1] if "=== DADOS ATUAIS ===" in dados else dados
     return {k: _num_br(v) for k, v in _campos_do_bloco(txt)[0].items()}
 
-def _trocar_secao(saida, titulo, corpo):
-    """Troca o CORPO de uma seção da resposta pelo texto que o CÓDIGO produziu.
-    O cabeçalho do modelo fica (ele numera as seções dinamicamente); o miolo é
-    substituído. É isto que torna a publicação garantida em vez de pedida: o modelo
-    deixa de ser quem digita o número, e obedecer vira irrelevante."""
-    if not corpo:
-        return saida, False
-    saiu, dentro, trocou = [], False, False
-    for linha in (saida or "").split("\n"):
-        limpa = re.sub(r"^[^\w\d]*", "", linha).strip()
-        if re.match(r"^\d+\.\s", limpa):
-            dentro = False
-            saiu.append(linha)
-            if not trocou and titulo.lower() in limpa.lower():
-                saiu.extend(corpo)
-                saiu.append("")
-                dentro = trocou = True
+# ─── A ANÁLISE VIRA ESTRUTURA — e para de ser re-interpretada em cada estágio ───
+# Até 05/08 a análise viajava como TEXTO e era lida por regex em três lugares
+# independentes: o validador aqui, a injeção dos blocos de código aqui, e o
+# `salvar_pdf` do app (nexo_analise.py:360). Três parsers sobre prosa de LLM, e
+# qualquer um podia discordar dos outros — cada conserto num abria folga em outro.
+# Agora a prosa vira estrutura UMA VEZ, aqui, e todo mundo depois lê estrutura.
+_RE_TITULO_SECAO = re.compile(r"^\s*[^\w\d]*(\d+)\.\s+(.+)$")
+_BANDEIRAS = {"\U0001F534": "risco", "\U0001F7E1": "atencao", "\U0001F7E2": "ok"}
+_SIMBOLOS = {v: k for k, v in _BANDEIRAS.items()}
+
+def _linha_estruturada(t):
+    """A bandeira vira DADO, não emoji no meio da frase. É o que dispensa o app de
+    fazer strip de emoji e remapear para bolinha colorida porque a fonte do PDF não
+    renderiza — em HTML a cor sai do campo `bandeira`."""
+    t = (t or "").strip()
+    band = next((b for b in _BANDEIRAS if t.startswith(b)), None)
+    if band:
+        return {"texto": t[len(band):].strip(), "bandeira": _BANDEIRAS[band], "tipo": "bandeira"}
+    if t.startswith("•"):
+        return {"texto": t.lstrip("• ").strip(), "bandeira": None, "tipo": "bullet"}
+    return {"texto": t, "bandeira": None, "tipo": "corrida"}
+
+def _em_secoes(texto):
+    """O ÚNICO ponto em que prosa vira estrutura.
+    Título de seção é MAIÚSCULO — sem isso, uma ação numerada ('1. Definir o preço
+    de saída…') seria lida como início de seção e partiria a análise ao meio."""
+    secoes, atual, preambulo = [], None, []
+    for linha in (texto or "").split("\n"):
+        m = _RE_TITULO_SECAO.match(linha)
+        if m and m.group(2).strip() == m.group(2).strip().upper():
+            atual = {"n": int(m.group(1)), "titulo": m.group(2).strip(),
+                     "origem": "modelo", "linhas": []}
+            secoes.append(atual)
             continue
-        if not dentro:
-            saiu.append(linha)
-    return "\n".join(saiu), trocou
+        if not linha.strip():
+            continue
+        (atual["linhas"] if atual is not None else preambulo).append(_linha_estruturada(linha))
+    if preambulo:
+        secoes.insert(0, {"n": None, "titulo": None, "origem": "modelo", "linhas": preambulo})
+    return secoes
+
+def _substituir_secao(secoes, chave, linhas):
+    """O miolo que o modelo escreveu é DESCARTADO e o do código entra no lugar.
+    `origem` fica no payload para o app poder mostrar o que é apurado."""
+    if not linhas:
+        return False
+    for s in secoes:
+        if s["titulo"] and chave.upper() in s["titulo"].upper():
+            s["linhas"] = [_linha_estruturada(l) for l in linhas]
+            s["origem"] = "codigo"
+            return True
+    return False
+
+def _texto_de_secoes(secoes):
+    """Achata a estrutura de volta em texto. Isto NÃO é legado descartável: é o campo
+    `analise` que a 1.0.2.0 instalada na máquina dos clientes espera. Acrescenta-se
+    `secoes`; nunca se remove `analise`, senão todo cliente instalado quebra junto."""
+    partes = []
+    for s in secoes:
+        if s["titulo"]:
+            partes.append(f"{s['n']}. {s['titulo']}")
+        for l in s["linhas"]:
+            pref = _SIMBOLOS.get(l["bandeira"], "") + " " if l["bandeira"] else (
+                   "• " if l["tipo"] == "bullet" else "")
+            partes.append(f"{pref}{l['texto']}")
+        partes.append("")
+    return "\n".join(partes).strip()
 
 def _bloco_metas(dados):
     """§8 ESCRITA POR CÓDIGO — mata o alvo arbitrado.
@@ -1441,16 +1487,31 @@ def gerar_analise(dados, segmento, modelo=None):
         return _normalizar_saida(r.choices[0].message.content)
 
     def _entregar(s):
-        """O QUE O CÓDIGO CALCULA, O CÓDIGO PUBLICA (#083). O Radar e as Metas saem
-        daqui, não da caneta do modelo — o que ele escreveu nessas duas seções é
+        """O QUE O CÓDIGO CALCULA, O CÓDIGO PUBLICA (#083). Radar e Metas saem daqui,
+        não da caneta do modelo — o miolo que ele escreveu nessas duas seções é
         descartado. Instrução de prompt já não bastava: 'reproduza exatamente como
         está' estava escrito e o PDF de agosto saiu com 16,8% onde o Motor calculou
-        16,77%. Aqui não há o que obedecer."""
-        s, ok_radar = _trocar_secao(s, "RADAR DO NEGÓCIO", [f"{r}" for r in radar])
-        s, ok_metas = _trocar_secao(s, "METAS", _bloco_metas(dados))
+        16,77%. Aqui não há o que obedecer.
+        Devolve (texto, secoes): o texto para a 1.0.2.0 instalada, a estrutura para o
+        app novo renderizar em HTML sem re-parsear nada."""
+        secoes = _em_secoes(s)
+        ok_radar = _substituir_secao(secoes, "RADAR", list(radar))
+        ok_metas = _substituir_secao(secoes, "METAS", _bloco_metas(dados))
+
+        # O degrau 3 não pode depender de o modelo acertar a seção: em 05/08 ele pôs
+        # a frase no Radar, e a substituição do Radar a levou junto. Agora ela é
+        # colocada por código, onde a perda é discutida.
+        if _valor_do_estoque(dados)[0] is None:
+            for sec in secoes:
+                titulo = (sec["titulo"] or "").upper()
+                if "PERDER DINHEIRO" in titulo or "CUSTANDO DINHEIRO" in titulo:
+                    if any("estoque" in l["texto"].lower() for l in sec["linhas"]):
+                        sec["linhas"].append(_linha_estruturada(FRASE_ESTOQUE_SEM_VALOR))
+                    break
+
         print(f"PUBLICACAO|{segmento}|radar={'codigo' if ok_radar else 'modelo'}|"
-              f"metas={'codigo' if ok_metas else 'modelo'}")
-        return s
+              f"metas={'codigo' if ok_metas else 'modelo'}|secoes={len(secoes)}")
+        return _texto_de_secoes(secoes), secoes
 
     saida = _pedir([{"role": "user", "content": prompt}])
     violacoes = validar_saida(saida, dados, indicadores, radar)
@@ -1492,7 +1553,8 @@ def gerar_analise(dados, segmento, modelo=None):
     # decisão, sem meta ou sem ação fica semanticamente quebrada. Devolve-se um
     # estado declarado, que preserva a promessa do produto.
     _registrar("fallback", segmento, violacoes2, f"modo={MODO_VALIDADOR}")
-    return FALLBACK_SEGURO
+    # Estado declarado, sem seções: não se mutila o PDF removendo linhas.
+    return FALLBACK_SEGURO, []
 
 @app.route("/analisar", methods=["POST"])
 def analisar():
@@ -1542,8 +1604,10 @@ def analisar():
             if not chave or not validar_licenca_chave(chave):
                 return jsonify({"status": "erro", "motivo": "Licença inválida ou expirada."}), 403
 
-        analise = gerar_analise(dados, segmento, body.get("modelo"))
-        return jsonify({"status": "ok", "analise": analise}), 200
+        analise, secoes = gerar_analise(dados, segmento, body.get("modelo"))
+        # `analise` é o contrato da 1.0.2.0 que já está instalada — ACRESCENTA-SE
+        # `secoes`, nunca se troca o formato, senão todo cliente instalado quebra.
+        return jsonify({"status": "ok", "analise": analise, "secoes": secoes}), 200
 
     except Exception as e:
         # Detalhe técnico fica no log do servidor; o cliente não vê mensagem interna
