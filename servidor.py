@@ -433,6 +433,63 @@ def _pct_sao(*valores, limite=300):
     O Motor cala em vez de imprimir '+5.900%' sob o selo de 'cálculo exato'."""
     return all(v is not None and abs(v) <= limite for v in valores)
 
+# ─── O ESTOQUE PARADO — a cifra mais carregada da análise, e ela vem de PROSA ───
+# "Situação do estoque atual" é tipo="text" (nexo_analise.py:692): o cliente escreve
+# à vontade e escreve o valor sem ninguém pedir — "ainda tem cerca de R$ 18.000 a
+# preço de custo parada" (teste real de 01/08). Esse número sustenta QUATRO seções:
+# a perda, a decisão, o gatilho da ação e a meta de estoque. E até aqui quem o lia da
+# prosa era o modelo.
+#
+# REGRA DO FUNDADOR (05/08), e é a espinha desta função:
+#     "Se o sistema tem certeza, usa. Se o sistema tem dúvida, cala."
+# Calar não é omitir — o produto DECLARA que não conseguiu determinar. É melhor
+# admitir uma limitação do que apresentar um número sem fundamento: a primeira o
+# lojista perdoa, a segunda destrói a confiança quando ele descobre.
+_RE_CIFRA_ESTOQUE = re.compile(r"R\$\s*(\d[\d.]*(?:,\d+)?)\s*(%?)")
+
+def _texto_do_campo(dados, chave):
+    """Valor de um campo do payload, com as linhas de continuação juntas.
+    O app envia 'chave: valor' (nexo_analise.py:851) e um widget Text quebra linha —
+    sem juntar a continuação, metade da frase do cliente se perde. Uma linha nova que
+    pareça 'outro_campo:' encerra: na dúvida colhe-se MENOS texto, que erra para o
+    lado de calar."""
+    achado, corpo = False, []
+    for linha in (dados or "").splitlines():
+        m = re.match(r"^([a-z_]+):\s?(.*)$", linha)
+        if m:
+            if achado:
+                break
+            if m.group(1) == chave:
+                achado, corpo = True, [m.group(2)]
+            continue
+        if achado:
+            corpo.append(linha)
+    return "\n".join(corpo).strip() if achado else ""
+
+def _valor_do_estoque(dados):
+    """Devolve (valor, motivo). valor=None é o DEGRAU 3 do #081 — declarar a ausência,
+    nunca estimar. Exige marcador de moeda: 'cerca de 30% parado' NÃO é R$ 30."""
+    texto = _texto_do_campo(dados, "estoque")
+    if not texto:
+        return None, "o campo de estoque não foi preenchido"
+    achados = _RE_CIFRA_ESTOQUE.findall(texto)
+    if not achados:
+        return None, "o cliente descreveu o estoque sem informar valor em reais"
+    if len(achados) > 1:
+        return None, "o campo traz mais de um valor em reais e não se sabe qual é o parado"
+    bruto, pct = achados[0]
+    if pct:
+        return None, "o número informado é percentual, não valor em reais"
+    v = _num_br(bruto)
+    if v is None or v <= 0:
+        return None, "o valor informado não pôde ser lido"
+    return v, "ok"
+
+# Frase do degrau 3, definida pelo fundador em 05/08. Sai daqui, literal, para o
+# prompt e para o validador — uma redação só, num lugar só.
+FRASE_ESTOQUE_SEM_VALOR = ("Foi identificado estoque parado, mas não foi possível determinar "
+                           "seu valor com segurança a partir dos dados informados.")
+
 def _fmt_br(v, dec=1):
     s = f"{v:,.{dec}f}".replace(",", "X").replace(".", ",").replace("X", ".")
     return s[:-2] if s.endswith(",0") else s
@@ -740,9 +797,14 @@ def _corrigir_vocabulario(texto):
         t = re.sub(padrao, certo, t)
     return t
 
-def _viol(regra, detalhe, trecho="", bloqueia=False, campo=""):
+def _viol(regra, detalhe, trecho="", bloqueia=False, campo="", observa=False):
+    """observa=True: a checagem REGISTRA mas não manda a análise de volta ao modelo.
+    Checagem nova estreia assim. O motivo é custo medido, não cerimônia: retentativa
+    dobra o consumo (6.299 → ~13.400 tokens) de um teto DIÁRIO compartilhado com
+    cliente pagante — um falso positivo novo tira análise da mão de quem pagou.
+    Mede-se a taxa de disparo no log e só então se promove a checagem."""
     return {"regra": regra, "detalhe": detalhe, "trecho": trecho[:90],
-            "bloqueia": bloqueia, "campo": campo}
+            "bloqueia": bloqueia, "campo": campo, "observa": observa}
 
 def validar_entrada(atual, brutos):
     """🔴 BLOQUEIO DE ENTRADA — erro do cliente, detectado ANTES de chamar a IA.
@@ -871,6 +933,41 @@ def validar_saida(saida, dados, indicadores, radar):
             v.append(_viol("comparação inconsistente",
                            f"{m.group(1)} → {m.group(2)} dá {(b - a) / abs(a) * 100:.1f}%, "
                            f"não {m.group(3)}%", m.group(0)))
+
+    # 7 · cifra de estoque parado que o código não autorizou (#083)
+    # Pega onde a checagem 1 é cega — linha de ação numerada e seção de METAS, que
+    # é justamente onde a cifra do estoque reaparece — e pega o que ela não vê:
+    # número que ESTÁ nos dados mas está no lugar errado (o R$ 21.000 da compra da
+    # coleção citado como se fosse o valor parado).
+    valor_estoque = _valor_do_estoque(dados)[0]
+    for linha in (saida or "").split("\n"):
+        for m in _RE_CIFRA_ESTOQUE.finditer(linha):
+            if m.group(2):                                  # percentual: outra regra
+                continue
+            # Só conta se a cifra estiver PERTO da fala de estoque parado…
+            ini, fim = max(0, m.start() - 60), min(len(linha), m.end() + 60)
+            if not re.search(r"estoque|encalh|parad[oa]|coleç", linha[ini:fim], re.I):
+                continue
+            # …e se ela não pertencer, visivelmente, a OUTRA grandeza. O §4 compara o
+            # estoque com o lucro na mesma frase ("é mais do que o lucro do mês, R$ X")
+            # e sem isto o lucro era acusado de ser estoque errado. Falso positivo
+            # medido no teste de 05/08, na estrutura que a própria maquete usa.
+            antes = linha[max(0, m.start() - 30):m.start()]
+            if re.search(r"lucro|faturamento|custos?|meta|ticket|margem|verba", antes, re.I):
+                continue
+            achado = _num_br(m.group(1))
+            if achado is None:
+                continue
+            if valor_estoque is None:
+                v.append(_viol("cifra de estoque sem fundamento",
+                               f"o produto afirmou R$ {m.group(1)} de estoque, e o campo de "
+                               f"estoque não permite determinar valor nenhum com segurança. "
+                               f"Escreva: \"{FRASE_ESTOQUE_SEM_VALOR}\"",
+                               linha, observa=True))
+            elif abs(achado - valor_estoque) > 0.01:
+                v.append(_viol("cifra de estoque diferente da informada",
+                               f"o produto afirmou R$ {m.group(1)} de estoque, e o cliente "
+                               f"escreveu R$ {_fmt_br(valor_estoque)}", linha, observa=True))
     return v
 
 def _registrar(fase, segmento, violacoes, extra=""):
@@ -880,7 +977,10 @@ def _registrar(fase, segmento, violacoes, extra=""):
         print(f"VALIDADOR|{fase}|{segmento}|ok|0|{extra}")
         return
     for x in violacoes:
-        print(f"VALIDADOR|{fase}|{segmento}|{x['regra']}|{x['detalhe']}|{x['trecho']}|{extra}")
+        # O marcador obs/ativa é o dado que decide quando promover uma checagem nova:
+        # sem ele não se sabe a taxa de disparo nem quantos eram falso positivo.
+        marca = "obs" if x.get("observa") else "ativa"
+        print(f"VALIDADOR|{fase}|{segmento}|{marca}|{x['regra']}|{x['detalhe']}|{x['trecho']}|{extra}")
 
 def _texto_das_violacoes(violacoes):
     linhas = [f"- {x['regra'].upper()}: {x['detalhe']}" +
@@ -1046,6 +1146,25 @@ def gerar_analise(dados, segmento, modelo=None):
             bloco_motor += "\nRADAR CALCULADO (reproduza na seção 1 exatamente como está):\n"
             bloco_motor += "".join(f"{r}\n" for r in radar)
         bloco_motor += "\n"
+
+    # O ESTOQUE PARADO — quem lê a cifra é o código, não o modelo (#083).
+    # Certeza usa, dúvida cala. A instrução abaixo é o pedido; a garantia é a
+    # checagem 7 do validador, porque instrução de prompt sobre número já provou
+    # não bastar (o PDF de agosto saiu com 16,8% tendo "reproduza exatamente" escrito).
+    valor_estoque, motivo_estoque = _valor_do_estoque(dados)
+    if valor_estoque is not None:
+        bloco_motor += (f"ESTOQUE PARADO — VALOR LIDO DO QUE O CLIENTE ESCREVEU: "
+                        f"R$ {_fmt_br(valor_estoque)}.\n"
+                        f"Use EXATAMENTE este valor ao falar do estoque parado. É PROIBIDO "
+                        f"escrever qualquer outro valor em reais para o estoque.\n\n")
+    else:
+        bloco_motor += (f"ESTOQUE PARADO — VALOR NÃO DETERMINADO ({motivo_estoque}).\n"
+                        f"É PROIBIDO afirmar, estimar ou arredondar QUALQUER valor em reais para o "
+                        f"estoque parado — inclusive 'cerca de', 'aproximadamente' ou 'em torno de'.\n"
+                        f"Se precisar mencionar o estoque parado com valor, escreva exatamente: "
+                        f"\"{FRASE_ESTOQUE_SEM_VALOR}\"\n"
+                        f"A decisão e as ações continuam valendo sem a cifra — o estoque perde o "
+                        f"tamanho, não o rumo.\n\n")
 
     modelo_usado = modelo if isinstance(modelo, str) and modelo in MODELOS_PERMITIDOS else MODELO_PADRAO
     prompt = (
@@ -1243,15 +1362,18 @@ def gerar_analise(dados, segmento, modelo=None):
     violacoes = validar_saida(saida, dados, indicadores, radar)
     _registrar("saida-1a-tentativa", segmento, violacoes, f"modo={MODO_VALIDADOR}")
 
+    # Checagem marcada observa=True entra no log e NÃO puxa retentativa — ver _viol.
+    ativas = [x for x in violacoes if not x.get("observa")]
+
     # FASE 1 — OBSERVAÇÃO: registra o que bloquearia e entrega a análise assim mesmo.
-    if MODO_VALIDADOR == "observacao" or not violacoes:
+    if MODO_VALIDADOR == "observacao" or not ativas:
         return saida
 
     # CAMINHO 2 — devolver os erros específicos à IA e pedir a correção.
     correcao = (
         "A resposta que você acabou de gerar foi reprovada pela validação automática do NEXO. "
         "Os problemas abaixo são objetivos — foram apurados em cálculo, não em opinião:\n\n"
-        f"{_texto_das_violacoes(violacoes)}\n\n"
+        f"{_texto_das_violacoes(ativas)}\n\n"
         "Reescreva a análise INTEIRA corrigindo exatamente esses pontos, mantendo tudo o que "
         "estava certo e obedecendo às mesmas regras do pedido original. Não comente a correção: "
         "devolva só a análise."
@@ -1269,7 +1391,7 @@ def gerar_analise(dados, segmento, modelo=None):
         return saida
     violacoes2 = validar_saida(saida2, dados, indicadores, radar)
     _registrar("saida-2a-tentativa", segmento, violacoes2, f"modo={MODO_VALIDADOR}")
-    if not violacoes2:
+    if not [x for x in violacoes2 if not x.get("observa")]:
         return saida2
 
     # FALLBACK CONTROLADO — não se mutila o PDF removendo linhas: uma análise sem
