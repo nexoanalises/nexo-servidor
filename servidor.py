@@ -1553,8 +1553,27 @@ def gerar_analise(dados, segmento, modelo=None):
     # decisão, sem meta ou sem ação fica semanticamente quebrada. Devolve-se um
     # estado declarado, que preserva a promessa do produto.
     _registrar("fallback", segmento, violacoes2, f"modo={MODO_VALIDADOR}")
-    # Estado declarado, sem seções: não se mutila o PDF removendo linhas.
-    return FALLBACK_SEGURO, []
+
+    # FALLBACK — e ele NÃO joga mais fora o que o código garantiu.
+    # A razão antiga ("não se mutila o PDF removendo linhas") valia quando a análise
+    # inteira era prosa do modelo: tirar uma parte deixava o resto sem sentido. Agora
+    # o Radar e as Metas são escritos por CÓDIGO e estão certos independentemente do
+    # que o modelo fez — quem falhou foi a interpretação, não a apuração.
+    # 🔴 Medido em produção, 05/08 12:43: uma rodada caiu aqui e o cliente recebeu
+    # UMA FRASE no lugar da análise, com o Motor tendo calculado tudo direito.
+    # Melhor entregar o que se garante e declarar o que faltou, do que entregar nada.
+    secoes = _em_secoes(saida2)
+    _substituir_secao(secoes, "RADAR", list(radar))
+    _substituir_secao(secoes, "METAS", _bloco_metas(dados))
+    apuradas = [s for s in secoes if s["origem"] == "codigo"]
+    if not apuradas:
+        return FALLBACK_SEGURO, []
+    apuradas.append({"n": None, "titulo": None, "origem": "codigo", "linhas": [
+        _linha_estruturada("Os números acima foram apurados e conferidos. A leitura e as "
+                           "recomendações desta análise não puderam ser produzidas com "
+                           "segurança desta vez — rode a análise novamente.")]})
+    print(f"PUBLICACAO|{segmento}|fallback-parcial|secoes-apuradas={len(apuradas) - 1}")
+    return _texto_de_secoes(apuradas), apuradas
 
 @app.route("/analisar", methods=["POST"])
 def analisar():
