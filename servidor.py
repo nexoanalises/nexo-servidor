@@ -472,6 +472,15 @@ def _texto_do_campo(dados, chave):
     sem juntar a continuação, metade da frase do cliente se perde. Uma linha nova que
     pareça 'outro_campo:' encerra: na dúvida colhe-se MENOS texto, que erra para o
     lado de calar."""
+    # 🔴 SÓ O BLOCO ATUAL. Esta função varria o payload INTEIRO e pegava a PRIMEIRA
+    # linha com a chave — que está na análise anterior, porque o app manda o mês
+    # passado antes do marcador. Medido: o lojista informava R$ 4.000 hoje e o
+    # produto publicava R$ 18.000 do mês passado, com o selo "apurado"; e com o
+    # campo de hoje VAZIO ele publicava o valor antigo como "o estoque que você
+    # informou". Irmão gêmeo do bug do `_teto_da_verba`, e a contradição estava
+    # dentro do próprio `_bloco_metas`: ele cortava certo para faturamento e lucro
+    # e errado para o estoque, na mesma função.
+    dados = (dados or "").split("=== DADOS ATUAIS ===", 1)[-1]
     achado, corpo = False, []
     for linha in (dados or "").splitlines():
         m = re.match(r"^([a-z_]+):\s?(.*)$", linha)
@@ -664,9 +673,19 @@ def _bloco_metas(dados):
     # Lucro NÃO é alvo novo: é o que o faturamento-alvo dá com a margem de hoje.
     alvo_fat = meta if (meta and fat and meta > fat) else fat
     if alvo_fat and margem is not None and lucro is not None:
-        linhas.append(f"• Lucro: de R$ {_fmt_rs(lucro)} para R$ {_fmt_rs(alvo_fat * margem / 100)} "
-                      f"— meta sugerida pelo NEXO, calculada com o faturamento acima e a "
-                      f"margem de hoje.")
+        alvo_lucro = alvo_fat * margem / 100
+        # Quando a meta de faturamento já foi batida, o alvo vira o próprio
+        # faturamento e a conta reproduz o lucro atual: saía "de R$ 7.900 para
+        # R$ 7.900" sob selo de apurado. Meta que repete o ponto de partida não é
+        # meta — é defesa, e se escreve como defesa.
+        if abs(alvo_lucro - lucro) < max(0.005 * abs(lucro or 1), 1):
+            linhas.append(f"• Lucro: manter em R$ {_fmt_rs(lucro)} ou mais — você já "
+                          f"faturou o que precisava; o que muda o lucro daqui em diante "
+                          f"é a margem, não o volume.")
+        else:
+            linhas.append(f"• Lucro: de R$ {_fmt_rs(lucro)} para R$ {_fmt_rs(alvo_lucro)} "
+                          f"— meta sugerida pelo NEXO, calculada com o faturamento acima e a "
+                          f"margem de hoje.")
 
     v_est = _valor_do_estoque(dados)[0]
     if v_est:
@@ -743,6 +762,10 @@ def _bloco_ciclo(dados, indicadores=()):
         chave, rotulo = "parcial", "Executei em parte"
     elif "não executei" in resp or "nao executei" in resp:
         chave, rotulo = "nao", "Não executei"
+    elif "primeira" in resp:
+        # A opção existe no formulário e não casava com nada: o lojista marcava
+        # "esta é minha primeira análise" e lia "Não informado" no relatório.
+        chave, rotulo = None, "Você marcou que esta seria sua primeira análise"
     else:
         chave, rotulo = None, "Não informado"
     linhas.append(f"O que você executou: {rotulo}" + (f" — {quais}" if quais else ""))
