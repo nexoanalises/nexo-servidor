@@ -358,7 +358,11 @@ def _conferir_somas_percentuais(brutos):
 ORDEM_CAMPOS_GERAIS = (
     "nome_negocio", "periodo", "objetivo_principal", "faturamento", "meta",
     "custos", "lucro", "verba_melhorias", "tempo_disponivel", "funcionarios",
-    "capacidade", "canais", "vendas_canal", "desafios", "observacoes",
+    # `canais` saiu do formulário em 06/08 (o `vendas_canal` já nomeia os canais).
+    # Fica fora daqui também: chave morta nesta lista faz ela mentir sobre o
+    # formulário. A 1.0.2.0 instalada ainda manda o campo — e ele continua sendo
+    # aceito, só que pelo caminho livre, sem exigência de ordem.
+    "capacidade", "vendas_canal", "desafios", "observacoes",
 )
 _POSICAO = {k: i for i, k in enumerate(ORDEM_CAMPOS_GERAIS)}
 
