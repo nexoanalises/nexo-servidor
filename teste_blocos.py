@@ -54,8 +54,15 @@ caso("margem vira defesa ('manter em')", "manter em 14,4% ou mais" in txt, True)
 # acima do atual. Meta que nao move o numero nao e meta: vira defesa declarada.
 caso("meta que nao move o numero vira defesa",
      "Lucro: manter em R$ 7.900 ou mais" in txt, True)
-caso("e explica que o volume ja foi feito",
-     "o que muda o lucro daqui em diante é a margem" in txt, True)
+# Com meta AINDA NAO batida (55.000 > 54.800), a frase nao pode dizer que ele ja
+# faturou o que precisava -- isso contradiria a linha de faturamento logo acima,
+# que manda ir de 54.800 para 55.000. Saiu assim no teste real de 06/08.
+caso("nao contradiz a meta de faturamento", "já faturou o que precisava" in txt, False)
+caso("explica que a meta sozinha nao move o lucro", "quase não move o lucro" in txt, True)
+# E quando a meta JA foi batida, a frase e a outra.
+batida = "\n".join(S._bloco_metas(JUNHO.replace("meta: 55.000", "meta: 50.000")))
+caso("meta batida: diz que o volume ja foi feito",
+     "já faturou o que precisava" in batida, True)
 # E quando a meta e de fato maior, a conta sai e diz que e sugerida.
 maior = "\n".join(S._bloco_metas(JUNHO.replace("meta: 55.000", "meta: 60.000")))
 caso("meta maior: conta sai rotulada",

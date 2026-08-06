@@ -683,9 +683,14 @@ def _bloco_metas(dados):
         # R$ 7.900" sob selo de apurado. Meta que repete o ponto de partida não é
         # meta — é defesa, e se escreve como defesa.
         if abs(alvo_lucro - lucro) < max(0.005 * abs(lucro or 1), 1):
-            linhas.append(f"• Lucro: manter em R$ {_fmt_rs(lucro)} ou mais — você já "
-                          f"faturou o que precisava; o que muda o lucro daqui em diante "
-                          f"é a margem, não o volume.")
+            if meta and fat and meta > fat:
+                linhas.append(f"• Lucro: manter em R$ {_fmt_rs(lucro)} ou mais — bater a "
+                              f"meta de faturamento acima, sozinha, quase não move o lucro. "
+                              f"Quem move é a margem.")
+            else:
+                linhas.append(f"• Lucro: manter em R$ {_fmt_rs(lucro)} ou mais — você já "
+                              f"faturou o que precisava; o que muda o lucro daqui em diante "
+                              f"é a margem, não o volume.")
         else:
             linhas.append(f"• Lucro: de R$ {_fmt_rs(lucro)} para R$ {_fmt_rs(alvo_lucro)} "
                           f"— meta sugerida pelo NEXO, calculada com o faturamento acima e a "
@@ -886,8 +891,18 @@ def calcular_motor(dados):
             sinal = "+" if d_fat >= 0 else ""
             texto_meta = ""
             if ating is not None:
-                texto_meta = (f" — e bateu a meta de R$ {_fmt_br(meta)} ({_fmt_br(ating)}%)" if ating >= 95
-                              else f" — mas ficou em {_fmt_br(ating)}% da meta de R$ {_fmt_br(meta)}")
+                # 🔴 "Bateu" a partir de 95% dizia que o lojista atingiu a meta
+                # quando ele ficou abaixo dela. No teste real de 06/08 saiu
+                # "bateu a meta de R$ 55.000 (99,6%)" — e o modelo escalou para
+                # "vendeu mais do que o previsto" na seção seguinte. Bater é
+                # chegar a 100%; 95–99,9% é quase, e quase se diz como quase.
+                if ating >= 100:
+                    texto_meta = f" — e bateu a meta de R$ {_fmt_br(meta)} ({_fmt_br(ating)}%)"
+                elif ating >= 95:
+                    texto_meta = (f" — e chegou perto da meta de R$ {_fmt_br(meta)}, "
+                                  f"faltando {_fmt_br(100 - ating)}% para bater")
+                else:
+                    texto_meta = f" — mas ficou em {_fmt_br(ating)}% da meta de R$ {_fmt_br(meta)}"
             # A ÂNCORA SAZONAL entra AQUI, na bandeira que o cliente de fato vê.
             # Queda em mês que o LOJISTA declarou fraco não é 🔴: é o esperado.
             # Sem isto, uma loja de roupas comparando janeiro com dezembro levava
@@ -898,7 +913,10 @@ def calcular_motor(dados):
             radar.append(f"{band_fat} Faturamento: R$ {_fmt_br(fat_ant)} → R$ {_fmt_br(fat)} "
                          f"({sinal}{_fmt_br(d_fat)}%){texto_meta}{nota_sazonal}")
             # 2. gastei quanto — a ponte que faltava
-            comparativo = ("subiram MAIS que o faturamento" if d_cus > d_fat
+            # "caíram" com +0% saiu no teste real de 06/08: variação exatamente
+            # zero caía no `else`. Ficar igual não é cair.
+            comparativo = ("ficaram iguais" if abs(d_cus) < 0.05
+                           else "subiram MAIS que o faturamento" if d_cus > d_fat
                            else "subiram menos que o faturamento" if d_cus > 0
                            else "caíram")
             radar.append(f"{'🔴' if d_cus > d_fat else '🟢'} Custos: R$ {_fmt_br(custos_ant)} → R$ {_fmt_br(custos)} "
@@ -1033,8 +1051,8 @@ def calcular_motor(dados):
         else:
             fixo = custos - compra
             pct = compra / custos * 100
-            indicadores.append(
-                f"Composição dos custos: R$ {_fmt_rs(compra)} foi compra de mercadoria "
+            radar.append(
+                f"💰 Composição dos custos: R$ {_fmt_rs(compra)} foi compra de mercadoria "
                 f"({_fmt_br(pct)}% dos custos) e R$ {_fmt_rs(fixo)} é custo fixo e "
                 f"despesa. O dinheiro que virou estoque não sumiu — está na prateleira.")
 
@@ -1051,11 +1069,11 @@ def calcular_motor(dados):
                          "período. Confira os dois campos — o NEXO não usou este número.")
         else:
             pct = depois / fat * 100
-            linha = (f"Caixa: R$ {_fmt_rs(depois)} do que você faturou ainda não entrou "
+            linha = (f"💵 Caixa: R$ {_fmt_rs(depois)} do que você faturou ainda não entrou "
                      f"({_fmt_br(pct)}% do faturamento)")
             if compra is not None and 0 < compra <= (custos or 0):
                 linha += f", enquanto R$ {_fmt_rs(compra)} já saíram em mercadoria"
-            indicadores.append(linha + ".")
+            radar.append(linha + ".")
 
     # ── A ÂNCORA SAZONAL ────────────────────────────────────────────────────────
     # Sem ela o NEXO compara mês contra mês anterior e nada mais: uma loja de roupas
