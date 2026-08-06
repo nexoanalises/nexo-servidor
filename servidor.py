@@ -1850,7 +1850,11 @@ def gerar_analise(dados, segmento, modelo=None):
         return _texto_de_secoes(secoes), secoes
 
     saida = _pedir([{"role": "user", "content": prompt}])
-    violacoes = validar_saida(saida, dados, indicadores, radar)
+    # Monta ANTES de validar: as seções escritas por código já entram no lugar, e o
+    # validador passa a julgar o que o cliente vai ler. As violações que sobram são,
+    # por construção, as que o modelo PODE consertar.
+    texto1, secoes1 = _entregar(saida)
+    violacoes = validar_saida(texto1, dados, indicadores, radar)
     _registrar("saida-1a-tentativa", segmento, violacoes, f"modo={MODO_VALIDADOR}")
 
     # Checagem marcada observa=True entra no log e NÃO puxa retentativa — ver _viol.
@@ -1858,7 +1862,7 @@ def gerar_analise(dados, segmento, modelo=None):
 
     # FASE 1 — OBSERVAÇÃO: registra o que bloquearia e entrega a análise assim mesmo.
     if MODO_VALIDADOR == "observacao" or not ativas:
-        return _entregar(saida)
+        return texto1, secoes1
 
     # CAMINHO 2 — devolver os erros específicos à IA e pedir a correção.
     correcao = (
@@ -1879,11 +1883,12 @@ def gerar_analise(dados, segmento, modelo=None):
                          {"role": "user", "content": correcao}])
     except Exception as e:
         print(f"VALIDADOR|correcao-falhou|{segmento}|{type(e).__name__}|{e}")
-        return _entregar(saida)
-    violacoes2 = validar_saida(saida2, dados, indicadores, radar)
+        return texto1, secoes1
+    texto2, secoes2 = _entregar(saida2)
+    violacoes2 = validar_saida(texto2, dados, indicadores, radar)
     _registrar("saida-2a-tentativa", segmento, violacoes2, f"modo={MODO_VALIDADOR}")
     if not [x for x in violacoes2 if not x.get("observa")]:
-        return _entregar(saida2)
+        return texto2, secoes2
 
     # FALLBACK CONTROLADO — não se mutila o PDF removendo linhas: uma análise sem
     # decisão, sem meta ou sem ação fica semanticamente quebrada. Devolve-se um
