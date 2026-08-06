@@ -720,6 +720,15 @@ def _anteriores(dados):
             txt = txt.split(corte, 1)[0]
     return {k: _num_br(v) for k, v in _campos_do_bloco(txt)[0].items()}
 
+def _sem_tag_de_prazo(texto):
+    """Tira a etiqueta (Custo: … | Resultado em: …) e a numeração da ação antiga.
+    Ela é do MÊS PASSADO — o app a renderiza como chip e o lojista lê como prazo
+    de agora."""
+    # O `[\s.·]*$` do fim importa: a frase costuma terminar em ")." e sem ele o
+    # ancoramento falhava por causa do ponto final.
+    t = re.sub(r"\s*\(?\s*Custo:[^)]*\)?[\s.·]*$", "", texto, flags=re.I)
+    return re.sub(r"^\s*\d+[\.\)]\s*", "", t).strip(" .·") + "."
+
 def _acoes_recomendadas(dados):
     """As ações que a análise ANTERIOR recomendou. O app manda o relatório inteiro
     daquele mês sob 'DECISÕES RECOMENDADAS'; aqui se pega só a seção de ações."""
@@ -727,8 +736,10 @@ def _acoes_recomendadas(dados):
         return []
     txt = dados.split("DECISÕES RECOMENDADAS", 1)[1].split("=== DADOS ATUAIS", 1)[0]
     for s in _em_secoes(txt):
-        if s["titulo"] and "AÇÕES" in s["titulo"].upper():
-            return [l["texto"] for l in s["linhas"] if len(l["texto"]) > 20][:3]
+        titulo = (s["titulo"] or "").upper()
+        if any(p in titulo for p in ("AÇÕES", "AÇÃO", "ACOES", "PLANO", "O QUE FAZER")):
+            return [_sem_tag_de_prazo(l["texto"]) for l in s["linhas"]
+                    if len(l["texto"]) > 20][:3]
     return []
 
 # As quatro leituras do ciclo. Sem a coluna "executou", as linhas 2 e 4 recebem o
