@@ -681,6 +681,10 @@ def calcular_motor(dados):
     ant_bruto = _campos_do_bloco(ant_txt)[0] if ant_txt else {}
     ant = {k: _num_br(v) for k, v in ant_bruto.items()}
 
+    # Lida cedo: a bandeira do faturamento precisa dela.
+    sazonal = (atual_bruto.get("ancora_sazonal") or "").strip()
+    mes_fraco = "fraco" in sazonal.lower()
+
     indicadores, radar = [], []
 
     # AVISO EM VEZ DE CHUTE: campo crítico preenchido que o Motor não conseguiu ler
@@ -743,8 +747,15 @@ def calcular_motor(dados):
             if ating is not None:
                 texto_meta = (f" — e bateu a meta de R$ {_fmt_br(meta)} ({_fmt_br(ating)}%)" if ating >= 95
                               else f" — mas ficou em {_fmt_br(ating)}% da meta de R$ {_fmt_br(meta)}")
-            radar.append(f"{'🟢' if d_fat > 0 else '🔴'} Faturamento: R$ {_fmt_br(fat_ant)} → R$ {_fmt_br(fat)} "
-                         f"({sinal}{_fmt_br(d_fat)}%){texto_meta}")
+            # A ÂNCORA SAZONAL entra AQUI, na bandeira que o cliente de fato vê.
+            # Queda em mês que o LOJISTA declarou fraco não é 🔴: é o esperado.
+            # Sem isto, uma loja de roupas comparando janeiro com dezembro levava
+            # bandeira vermelha todo ano — número certo, leitura falsa.
+            band_fat = "🟢" if d_fat > 0 else ("🟡" if mes_fraco else "🔴")
+            nota_sazonal = " — e você declarou que este costuma ser um mês fraco" if (
+                mes_fraco and d_fat <= 0) else ""
+            radar.append(f"{band_fat} Faturamento: R$ {_fmt_br(fat_ant)} → R$ {_fmt_br(fat)} "
+                         f"({sinal}{_fmt_br(d_fat)}%){texto_meta}{nota_sazonal}")
             # 2. gastei quanto — a ponte que faltava
             comparativo = ("subiram MAIS que o faturamento" if d_cus > d_fat
                            else "subiram menos que o faturamento" if d_cus > 0
@@ -831,7 +842,8 @@ def calcular_motor(dados):
         indicadores.append(f"{nome}: {moeda}{_fmt_br(b)} → {moeda}{_fmt_br(a)} "
                            f"({'+' if delta >= 0 else ''}{_fmt_br(delta)}%)")
         if chave == "faturamento" and not conta_historia:
-            band = "🟢" if delta > 0 else ("🟡" if delta >= -5 else "🔴")
+            # Mesma regra da comparação rica: queda em mês declarado fraco não é 🔴.
+            band = "🟢" if delta > 0 else ("🟡" if (delta >= -5 or mes_fraco) else "🔴")
             radar.append(f"{band} Faturamento vs análise anterior: {'+' if delta >= 0 else ''}{_fmt_br(delta)}%")
     # A EVOLUÇÃO DOS CANAIS — "Loja física 65% | WhatsApp 25%" é texto, então nenhum
     # campo numérico a captura, e o canal que mais cresce ficava invisível. É a única
@@ -866,6 +878,53 @@ def calcular_motor(dados):
         radar.extend(avisos[:3])
         if len(avisos) > 3:
             radar.append(f"🟡 …e mais {len(avisos) - 3} campo(s) a conferir no preenchimento")
+
+    # ── PARA ONDE FOI O DINHEIRO — compra de mercadoria × custo fixo ────────────
+    # A dor D03 é "o dinheiro some no fim do mês e eu não sei por quê". O produto
+    # sabia o total dos custos e não sabia DO QUÊ. No teste real de 01/08 a resposta
+    # existiu — mas dentro de `observacoes`, porque o cliente teve a boa vontade de
+    # decompor sozinho. Dependia da generosidade de quem preenche.
+    compra = atual.get("compra_mercadoria")
+    if compra is not None and compra > 0 and custos and custos > 0:
+        if compra > custos:
+            radar.append("🟡 A compra de mercadoria informada é maior que os custos do "
+                         "período. Confira os dois campos — o NEXO não usou este número.")
+        else:
+            fixo = custos - compra
+            pct = compra / custos * 100
+            indicadores.append(
+                f"Composição dos custos: R$ {_fmt_rs(compra)} foi compra de mercadoria "
+                f"({_fmt_br(pct)}% dos custos) e R$ {_fmt_rs(fixo)} é custo fixo e "
+                f"despesa. O dinheiro que virou estoque não sumiu — está na prateleira.")
+
+    # ── O EIXO DO CAIXA ─────────────────────────────────────────────────────────
+    # D06: "meu faturamento cresce e o caixa continua apertado". Faturamento, custos
+    # e lucro são COMPETÊNCIA; caixa é quando o dinheiro entra. Quem vende em 12x
+    # tem lucro e não tem caixa — e o NEXO dizia a ele que a margem estava saudável.
+    # Pergunta-se o VALOR que só entra depois, não o percentual: 30% em 2x e 30% em
+    # 12x produzem defasagens opostas e o percentual devolvia o mesmo número.
+    depois = atual.get("recebimento_futuro")
+    if depois is not None and depois > 0 and fat and fat > 0:
+        if depois > fat:
+            radar.append("🟡 O valor a receber informado é maior que o faturamento do "
+                         "período. Confira os dois campos — o NEXO não usou este número.")
+        else:
+            pct = depois / fat * 100
+            linha = (f"Caixa: R$ {_fmt_rs(depois)} do que você faturou ainda não entrou "
+                     f"({_fmt_br(pct)}% do faturamento)")
+            if compra is not None and 0 < compra <= (custos or 0):
+                linha += f", enquanto R$ {_fmt_rs(compra)} já saíram em mercadoria"
+            indicadores.append(linha + ".")
+
+    # ── A ÂNCORA SAZONAL ────────────────────────────────────────────────────────
+    # Sem ela o NEXO compara mês contra mês anterior e nada mais: uma loja de roupas
+    # comparando janeiro com dezembro parece catástrofe todo ano. Não é imprecisão —
+    # é conclusão errada com número certo, e por isso passa por todas as checagens.
+    # O lojista DECLARA (comparar com o mesmo mês do ano passado exigiria 12 análises
+    # no histórico, e nenhum cliente tem).
+    if sazonal:
+        radar.append(f"📅 Você declarou que este costuma ser um {sazonal.lower()} "
+                     f"para o seu negócio.")
     return indicadores, radar
 
 def _normalizar_saida(texto):
