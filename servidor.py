@@ -696,7 +696,7 @@ _LEITURA_CICLO = {
     ("nao", False):     "A recomendação não chegou a ser testada. Ela continua de pé.",
 }
 
-def _bloco_ciclo(dados):
+def _bloco_ciclo(dados, indicadores=()):
     """§2 CICLO ANTERIOR — escrita por CÓDIGO.
 
     Quatro fatos lado a lado e uma leitura escolhida por tabela, não por opinião:
@@ -728,12 +728,22 @@ def _bloco_ciclo(dados):
         chave, rotulo = None, "Não informado"
     linhas.append(f"O que você executou: {rotulo}" + (f" — {quais}" if quais else ""))
 
+    # TODAS as comparações apuradas, não uma amostra. A seção antiga PEDIA ao modelo
+    # que percorresse as linhas calculadas — e pedir nunca garantiu que ele
+    # percorresse. Inclusive as que MELHORARAM: o dono precisa saber o que está
+    # funcionando para não desmontar justamente isso.
+    comparacoes = [i for i in indicadores if "→" in i or "vs análise anterior" in i]
+    if comparacoes:
+        linhas.append("O que aconteceu com os números:")
+        linhas += [f"• {c}" for c in comparacoes]
+
     lucro, lucro_ant = a.get("lucro"), ant.get("lucro")
     melhorou = None
     if lucro is not None and lucro_ant is not None:
         melhorou = lucro >= lucro_ant
-        linhas.append(f"O que aconteceu com o lucro: R$ {_fmt_rs(lucro_ant)} → "
-                      f"R$ {_fmt_rs(lucro)}")
+        if not comparacoes:
+            linhas.append(f"O que aconteceu com o lucro: R$ {_fmt_rs(lucro_ant)} → "
+                          f"R$ {_fmt_rs(lucro)}")
 
     mudou = (bruto.get("mudancas") or "").strip()
     if mudou:
@@ -1334,8 +1344,20 @@ def gerar_analise(dados, segmento, modelo=None):
             "citando os números que provam (margem, faturamento vs meta). Sem suavizar e sem dramatizar."
         ]
     num = 2
-    # Oito números viram uma frase que o dono entende sem fazer conta. Vem logo depois
-    # do Radar porque é a leitura do Radar, não uma seção nova de conteúdo.
+    # §2 CICLO ANTERIOR — o miolo é escrito por CÓDIGO (_bloco_ciclo). O prompt
+    # reserva a POSIÇÃO: sem ela declarada aqui, a seção seria acrescentada no fim
+    # e o relatório sairia fora da ordem do mapa. O que o modelo escreve aqui é
+    # descartado quando há histórico; serve de rede se a substituição falhar.
+    if tem_historico:
+        secoes.append(
+            f"🔄 {num}. O CICLO ANTERIOR\n"
+            "Compare os números atuais com os da análise anterior, com os valores lado a lado. "
+            "Fale sempre do RESULTADO, nunca da conduta do dono: diga o que os números mostram, "
+            "jamais se ele executou ou deixou de executar — isso só o próprio lojista declara."
+        )
+        num += 1
+    # Oito números viram uma frase que o dono entende sem fazer conta. Vem depois do
+    # Radar e do Ciclo porque é a leitura deles, não uma seção nova de conteúdo.
     secoes.append(
         f"🧭 {num}. DIAGNÓSTICO CENTRAL\n"
         "Duas partes, nesta ordem e nada além disso:\n"
@@ -1351,33 +1373,47 @@ def gerar_analise(dados, segmento, modelo=None):
         "Não repita isto nas outras seções e não emende recomendação aqui — diagnóstico é o que É, "
         "não o que fazer."
     ); num += 1
-    if tem_historico:
-        secoes.append(
-            f"🔄 {num}. EVOLUÇÃO DESDE A ÚLTIMA ANÁLISE\n"
-            "Compare os números atuais com os da análise anterior: o que melhorou, o que piorou e o que ficou igual — "
-            "sempre com os números lado a lado (use os INDICADORES CALCULADOS quando existirem). "
-            "Se a análise anterior tiver seção de METAS, confira meta a meta: cumprida, parcial ou não cumprida — "
-            "só quando os campos atuais permitirem conferir; se não permitirem, diga 'não informado desta vez'. "
-            "Percorra TODAS as linhas de INDICADORES CALCULADOS que comparam períodos e reporte cada uma, "
-            "inclusive as que MELHORARAM — o dono precisa saber o que está funcionando para não desmontar justamente isso. "
-            "Campo percentual varia em PONTOS, e o cálculo já vem pronto: copie, não converta. "
-            "Se um problema aparecer repetido em análises seguidas, nomeie a reincidência "
-            "(ex.: 'é a 2ª análise seguida com ruptura do produto campeão'). "
-            "Fale sempre do RESULTADO, nunca da conduta do dono: diga se a meta foi atingida e o que os números "
-            "mostram, jamais se ele executou ou deixou de executar. Se deu resultado, reconheça com números.\n"
-            "📚 FECHE A SEÇÃO COM O APRENDIZADO, em quatro linhas curtas e nesta ordem — é o que transforma "
-            "comparação em conhecimento, e é a razão de o histórico existir:\n"
-            "  'O que foi recomendado:' a decisão da análise anterior, em uma linha.\n"
-            "  'O que aconteceu:' os números que respondem a ela, os que melhoraram E os que pioraram.\n"
-            "  'O que isso ensina:' a lição em uma frase, sobre o MECANISMO, falando dos NÚMEROS e nunca da "
-            "estratégia como sujeito que agiu (ex.: 'as vendas subiram e a rentabilidade não acompanhou'). "
-            "Escrever 'a estratégia não foi suficiente' pressupõe que ela foi executada — e isso você não sabe.\n"
-            "  'O que muda agora:' como essa lição altera a decisão deste período.\n"
-            "Se não houver decisão anterior registrada, escreva 'primeira análise com histórico — sem "
-            "recomendação anterior para conferir' e pule as outras três linhas."
-        )
-        num += 1
-    secoes.append(f"🎯 {num}. DECISÃO MAIS IMPORTANTE AGORA\nUma única decisão crítica e direta."); num += 1
+    # A antiga seção EVOLUÇÃO DESDE A ÚLTIMA ANÁLISE foi REMOVIDA daqui: ela e o
+    # §2 CICLO ANTERIOR falavam da mesma coisa, e duas seções sobre o mesmo
+    # assunto é a doença que o mapa das 8 veio curar. O que ela tinha de valor
+    # migrou para o CÓDIGO: as quatro linhas do APRENDIZADO viraram a tabela de
+    # leitura do _bloco_ciclo, e a ordem de 'reportar TODAS as comparações' virou
+    # publicação garantida — pedir ao modelo que percorresse as linhas nunca
+    # garantiu que ele percorresse.
+    # ⬇️ A ORDEM DO MAPA APROVADO: primeiro o que está sangrando e o que ameaça,
+    # depois a escolha e a execução. Decidir antes de mostrar a perda punha a
+    # decisão sem lastro na página — o dono lia a conclusão antes da evidência.
+    secoes.append(
+        f"⚠️ {num}. O QUE ESTÁ TE FAZENDO PERDER DINHEIRO\n"
+        "Onde o dinheiro está saindo AGORA e onde ele está parado podendo voltar — "
+        "as duas coisas nesta seção, porque para o dono é o mesmo bolso.\n"
+        "Até 4 linhas, cada uma com o número que a prova quando ele existir nos dados:\n"
+        "• O QUE SANGRA — custo que subiu mais que a venda, desconto que comeu a margem, "
+        "perda por validade ou defeito.\n"
+        "• O QUE ESTÁ PARADO — dinheiro que já foi gasto e não voltou: estoque encalhado, "
+        "crédito com fornecedor, devolução pendente. Diga o valor SÓ quando ele estiver nos dados.\n"
+        "• O QUE ESTÁ ESBARRANDO — cliente que já está chegando e não fecha: fricção declarada, "
+        "demora de resposta, reclamação, horário sem atendimento.\n"
+        "Se algum desses não tiver base nos dados, simplesmente não escreva a linha. "
+        "Não invente para preencher, e não repita aqui o que a seção de decisão vai dizer."
+    ); num += 1
+    secoes.append(
+        f"🚨 {num}. ALERTAS\n"
+        "Até 3 riscos latentes que ainda NÃO estão custando dinheiro — se já está custando, "
+        "é a seção anterior. Aqui é o que ameaça o próximo ciclo.\n"
+        "Antes de escrever, VARRA os campos de reclamações, trocas/defeitos, fornecedores (atrasos e "
+        "defeitos recorrentes — cite o nome do fornecedor quando informado, e NUNCA atribua a um fornecedor o defeito "
+        "que os dados atribuem a outro) e tendência de queda em qualquer número. "
+        "Defeito ou atraso de fornecedor citado nos dados é SEMPRE alerta — mas descreva o FATO ('3 blusas com "
+        "desfiado na costura'), nunca um veredito sobre a empresa ('problemas de qualidade', 'reavaliar a parceria'). "
+        "DEPENDÊNCIA DE CANAL — REGRA: só classificar um canal como 'dependência' ou 'risco de dependência' quando "
+        "esse canal representar MAIS DE 50% das vendas do período. Igual ou abaixo de 50%, não usar os termos "
+        "'dependência', 'dependência alta' nem 'risco de dependência'. Canal que cresceu e permanece em 50% ou menos "
+        "é OPORTUNIDADE DE CRESCIMENTO, nunca dependência. "
+        "Somente se realmente não houver nenhum risco nos dados, escreva apenas: Nenhum alerta crítico neste período."
+    ); num += 1
+    secoes.append(f"🎯 {num}. DECISÃO MAIS IMPORTANTE AGORA\nUma única decisão crítica e direta, "
+                  f"e ela responde à MAIOR perda apurada na seção anterior."); num += 1
     secoes.append(
         f"🔧 {num}. AÇÕES IMEDIATAS\n"
         "No máximo 3 ações práticas, executáveis e simples, compatíveis com a verba e o tempo informados. "
@@ -1390,32 +1426,6 @@ def gerar_analise(dados, segmento, modelo=None):
         "Ao final de CADA ação, acrescente uma tag curta entre parênteses com o custo e o prazo de resultado, "
         "neste formato exato: (Custo: zero | Resultado em: ~7 dias). "
         "Use valores realistas em reais (ou 'zero') e prazos aproximados. Não use notas, pontuações ou percentuais de prioridade."
-    ); num += 1
-    secoes.append(f"⚠️ {num}. O QUE ESTÁ TE FAZENDO PERDER DINHEIRO\nProblemas claros e acionáveis identificados nos dados."); num += 1
-    secoes.append(
-        f"📈 {num}. ONDE ESTÁ A OPORTUNIDADE\n"
-        "Três linhas, uma de cada tipo, nesta ordem — e nenhuma repete a seção de decisão:\n"
-        "• COMERCIAL — vender mais para quem já está chegando. Olhe o canal que cresceu e a fricção declarada "
-        "(demora na resposta, reclamação, horário sem atendimento): o cliente já está lá, só está esbarrando em algo.\n"
-        "• FINANCEIRA — dinheiro parado que volta para o caixa (estoque encalhado, crédito com fornecedor, "
-        "devolução pendente). Diga o valor quando ele estiver nos dados.\n"
-        "• DE MARGEM — reduzir a distância entre o quanto as vendas crescem e o quanto os custos crescem.\n"
-        "Se um dos três não tiver base nos dados, escreva a linha assim: 'sem dado suficiente neste período'. "
-        "Não invente para preencher."
-    ); num += 1
-    secoes.append(
-        f"🚨 {num}. ALERTAS\n"
-        "Até 3 riscos latentes que ainda não exigem ação imediata, mas merecem atenção. "
-        "Antes de escrever esta seção, VARRA os campos de reclamações, trocas/defeitos, fornecedores (atrasos e "
-        "defeitos recorrentes — cite o nome do fornecedor quando informado, e NUNCA atribua a um fornecedor o defeito "
-        "que os dados atribuem a outro) e tendência de queda em qualquer número. "
-        "Defeito ou atraso de fornecedor citado nos dados é SEMPRE alerta — mas descreva o FATO ('3 blusas com "
-        "desfiado na costura'), nunca um veredito sobre a empresa ('problemas de qualidade', 'reavaliar a parceria'). "
-        "DEPENDÊNCIA DE CANAL — REGRA: só classificar um canal como 'dependência' ou 'risco de dependência' quando "
-        "esse canal representar MAIS DE 50% das vendas do período. Igual ou abaixo de 50%, não usar os termos "
-        "'dependência', 'dependência alta' nem 'risco de dependência'. Canal que cresceu e permanece em 50% ou menos "
-        "é OPORTUNIDADE DE CRESCIMENTO, nunca dependência. "
-        "Somente se realmente não houver nenhum risco nos dados, escreva apenas: Nenhum alerta crítico neste período."
     ); num += 1
     secoes.append(
         f"🧭 {num}. METAS ATÉ A PRÓXIMA ANÁLISE\n"
@@ -1681,7 +1691,7 @@ def gerar_analise(dados, segmento, modelo=None):
         app novo renderizar em HTML sem re-parsear nada."""
         secoes = _em_secoes(s)
         ok_radar = _garantir_secao(secoes, "RADAR", "RADAR DO NEGÓCIO", list(radar))
-        ok_ciclo = _garantir_secao(secoes, "CICLO", "O CICLO ANTERIOR", _bloco_ciclo(dados))
+        ok_ciclo = _garantir_secao(secoes, "CICLO", "O CICLO ANTERIOR", _bloco_ciclo(dados, indicadores))
         ok_metas = _garantir_secao(secoes, "METAS", "METAS ATÉ A PRÓXIMA ANÁLISE",
                                    _bloco_metas(dados))
 
@@ -1751,7 +1761,7 @@ def gerar_analise(dados, segmento, modelo=None):
     # Melhor entregar o que se garante e declarar o que faltou, do que entregar nada.
     secoes = _em_secoes(saida2)
     _garantir_secao(secoes, "RADAR", "RADAR DO NEGÓCIO", list(radar))
-    _garantir_secao(secoes, "CICLO", "O CICLO ANTERIOR", _bloco_ciclo(dados))
+    _garantir_secao(secoes, "CICLO", "O CICLO ANTERIOR", _bloco_ciclo(dados, indicadores))
     _garantir_secao(secoes, "METAS", "METAS ATÉ A PRÓXIMA ANÁLISE", _bloco_metas(dados))
     apuradas = [s for s in secoes if s["origem"] == "codigo"]
     if not apuradas:
