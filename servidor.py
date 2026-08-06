@@ -663,6 +663,91 @@ def _bloco_metas(dados):
                   "cálculos realizados nesta análise.")
     return linhas
 
+def _anteriores(dados):
+    """Números da análise ANTERIOR, com a mesma leitura do Motor."""
+    if "DADOS DAQUELA ANÁLISE:" not in dados:
+        return {}
+    txt = dados.split("DADOS DAQUELA ANÁLISE:", 1)[1]
+    for corte in ("DECISÕES RECOMENDADAS", "=== ANÁLISE ANTERIOR 2", "=== DADOS ATUAIS"):
+        if corte in txt:
+            txt = txt.split(corte, 1)[0]
+    return {k: _num_br(v) for k, v in _campos_do_bloco(txt)[0].items()}
+
+def _acoes_recomendadas(dados):
+    """As ações que a análise ANTERIOR recomendou. O app manda o relatório inteiro
+    daquele mês sob 'DECISÕES RECOMENDADAS'; aqui se pega só a seção de ações."""
+    if "DECISÕES RECOMENDADAS" not in dados:
+        return []
+    txt = dados.split("DECISÕES RECOMENDADAS", 1)[1].split("=== DADOS ATUAIS", 1)[0]
+    for s in _em_secoes(txt):
+        if s["titulo"] and "AÇÕES" in s["titulo"].upper():
+            return [l["texto"] for l in s["linhas"] if len(l["texto"]) > 20][:3]
+    return []
+
+# As quatro leituras do ciclo. Sem a coluna "executou", as linhas 2 e 4 recebem o
+# MESMO conselho — e elas pedem conselhos opostos. O PDF de agosto escreveu "ainda
+# é importante", que é certo para a 4 e errado para a 2: acertou por sorte.
+_LEITURA_CICLO = {
+    ("sim", True):      "Você executou e o resultado veio. Repetir é a aposta mais segura do próximo ciclo.",
+    ("sim", False):     "Você executou e o resultado não veio. O caminho não é insistir — é mudar a abordagem.",
+    ("parcial", True):  "Você executou em parte e o resultado veio. Vale terminar o que ficou pela metade antes de tentar coisa nova.",
+    ("parcial", False): "Você executou em parte e o resultado não veio. Antes de trocar de estratégia, veja se o que faltou executar era justamente o que sustentava a recomendação.",
+    ("nao", True):      "O resultado melhorou sem que a recomendação fosse executada. Vale descobrir o que puxou — porque não foi isso.",
+    ("nao", False):     "A recomendação não chegou a ser testada. Ela continua de pé.",
+}
+
+def _bloco_ciclo(dados):
+    """§2 CICLO ANTERIOR — escrita por CÓDIGO.
+
+    Quatro fatos lado a lado e uma leitura escolhida por tabela, não por opinião:
+    o que foi recomendado · o que o lojista executou · o que aconteceu com os
+    números · o que ele mudou por conta própria. É o que transforma "como foi meu
+    mês?" em "o que eu fiz funcionou?".
+
+    Nada aqui é inferido: sem análise anterior a seção não existe, e sem declaração
+    de execução o produto NÃO atribui o resultado à recomendação."""
+    recomendadas = _acoes_recomendadas(dados)
+    if not recomendadas:
+        return []                      # primeira análise: não há ciclo a comparar
+
+    a, ant = _atuais(dados), _anteriores(dados)
+    bruto = _campos_do_bloco(dados.split("=== DADOS ATUAIS ===", 1)[-1])[0]
+
+    linhas = ["O que o NEXO recomendou no ciclo anterior:"]
+    linhas += [f"• {r}" for r in recomendadas]
+
+    resp = (bruto.get("acoes_executadas") or "").strip().lower()
+    quais = (bruto.get("acoes_quais") or "").strip()
+    if "todas" in resp or resp.startswith("sim"):
+        chave, rotulo = "sim", "Executei todas"
+    elif "parte" in resp:
+        chave, rotulo = "parcial", "Executei em parte"
+    elif "não executei" in resp or "nao executei" in resp:
+        chave, rotulo = "nao", "Não executei"
+    else:
+        chave, rotulo = None, "Não informado"
+    linhas.append(f"O que você executou: {rotulo}" + (f" — {quais}" if quais else ""))
+
+    lucro, lucro_ant = a.get("lucro"), ant.get("lucro")
+    melhorou = None
+    if lucro is not None and lucro_ant is not None:
+        melhorou = lucro >= lucro_ant
+        linhas.append(f"O que aconteceu com o lucro: R$ {_fmt_rs(lucro_ant)} → "
+                      f"R$ {_fmt_rs(lucro)}")
+
+    mudou = (bruto.get("mudancas") or "").strip()
+    if mudou:
+        linhas.append(f"O que mudou por sua conta: {mudou}")
+
+    if chave and melhorou is not None:
+        linhas.append(_LEITURA_CICLO[(chave, melhorou)])
+    else:
+        # 🔴 A fronteira de execução: sem declaração, o produto NÃO escolhe entre as
+        # histórias possíveis — ele diz que não escolhe.
+        linhas.append("Você não informou o que executou, então esta análise observa o "
+                      "resultado sem atribuí-lo às recomendações anteriores.")
+    return linhas
+
 def calcular_motor(dados):
     """Retorna (indicadores, radar): listas de linhas calculadas dos dados.
     Listas vazias se nada foi parseável — o prompt então cai no modo antigo."""
@@ -1596,6 +1681,7 @@ def gerar_analise(dados, segmento, modelo=None):
         app novo renderizar em HTML sem re-parsear nada."""
         secoes = _em_secoes(s)
         ok_radar = _garantir_secao(secoes, "RADAR", "RADAR DO NEGÓCIO", list(radar))
+        ok_ciclo = _garantir_secao(secoes, "CICLO", "O CICLO ANTERIOR", _bloco_ciclo(dados))
         ok_metas = _garantir_secao(secoes, "METAS", "METAS ATÉ A PRÓXIMA ANÁLISE",
                                    _bloco_metas(dados))
 
@@ -1610,8 +1696,8 @@ def gerar_analise(dados, segmento, modelo=None):
                         sec["linhas"].append(_linha_estruturada(FRASE_ESTOQUE_SEM_VALOR))
                     break
 
-        print(f"PUBLICACAO|{segmento}|radar={ok_radar}|metas={ok_metas}|"
-              f"secoes={len(secoes)}")
+        print(f"PUBLICACAO|{segmento}|radar={ok_radar}|ciclo={ok_ciclo}|"
+              f"metas={ok_metas}|secoes={len(secoes)}")
         return _texto_de_secoes(secoes), secoes
 
     saida = _pedir([{"role": "user", "content": prompt}])
@@ -1665,6 +1751,7 @@ def gerar_analise(dados, segmento, modelo=None):
     # Melhor entregar o que se garante e declarar o que faltou, do que entregar nada.
     secoes = _em_secoes(saida2)
     _garantir_secao(secoes, "RADAR", "RADAR DO NEGÓCIO", list(radar))
+    _garantir_secao(secoes, "CICLO", "O CICLO ANTERIOR", _bloco_ciclo(dados))
     _garantir_secao(secoes, "METAS", "METAS ATÉ A PRÓXIMA ANÁLISE", _bloco_metas(dados))
     apuradas = [s for s in secoes if s["origem"] == "codigo"]
     if not apuradas:
