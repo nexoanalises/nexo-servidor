@@ -428,6 +428,25 @@ def _campos_do_bloco(bloco):
                     sequestrados.append(chave)
     return campos, sequestrados
 
+_RE_CANAL_REAIS = re.compile(r"([A-Za-zÀ-ÿ][A-Za-zÀ-ÿ \-\./]{1,28}?)\s*R?\$\s*([\d.]+(?:,\d+)?)")
+
+def _canais_reais(texto):
+    """'Loja R$ 25.000 | Mercado Livre R$ 18.000' -> {'Loja': 25000.0, ...}.
+
+    Irmão do `_canais()`, que lê percentual. Existe porque o `custo_canal` foi
+    convertido de prosa para reais por canal justamente para dar margem de
+    contribuição por canal — a dor nº 1 do Multicanal — e a conversão tinha sido
+    feita só no app."""
+    fora = {}
+    for bruto, valor in _RE_CANAL_REAIS.findall(texto or ""):
+        nome = bruto.strip(" |-–—.").strip()
+        if len(nome) < 3:
+            continue
+        v = _num_br(valor)
+        if v is not None and v > 0:
+            fora[nome] = v
+    return fora
+
 def _pct_sao(*valores, limite=300):
     """Percentual fora desta faixa quase sempre é campo mal preenchido, não negócio.
     O Motor cala em vez de imprimir '+5.900%' sob o selo de 'cálculo exato'."""
@@ -1020,6 +1039,55 @@ def calcular_motor(dados):
     if sazonal:
         radar.append(f"📅 Você declarou que este costuma ser um {sazonal.lower()} "
                      f"para o seu negócio.")
+
+    # ── OS CAMPOS QUE ERAM PEDIDOS E NÃO ERAM LIDOS ─────────────────────────────
+    # Uma auditoria de 06/08 achou OITO campos com zero ocorrências aqui: o lojista
+    # preenchia e o produto não usava. Pedir trabalho em troca de nada é pior que
+    # não ter o campo. Cada um vira linha apurada, e cala quando vem vazio.
+
+    # DESCONTO — a dor nº 3 do Varejo. Dois números declarados lado a lado, sem
+    # derivação: nada de "cada peça saiu no prejuízo", que foi o defeito de ontem.
+    desc = atual.get("desconto_valor")
+    if desc is not None and desc > 0:
+        linha = f"Descontos concedidos no período: R$ {_fmt_rs(desc)}"
+        if lucro is not None:
+            linha += f", contra um lucro de R$ {_fmt_rs(lucro)} no mesmo período"
+        indicadores.append(linha + ".")
+
+    # TEMPO DE PRATELEIRA — no Celular o estoque perde valor a cada lançamento.
+    semanas = atual.get("tempo_prateleira")
+    if semanas is not None and 0 < semanas <= 520:
+        indicadores.append(f"Item mais antigo parado há {_fmt_br(semanas)} semanas.")
+
+    # AGENDA OCIOSA — conta trivial sobre campo que já chega numérico, e é a única
+    # cifra que o desenho aprovou para o Pet. Em PERCENTUAL: valorizar em reais
+    # exigiria a capacidade teórica, que o lojista não tem e chutaria.
+    ocup = atual.get("agenda_ocupacao")
+    if ocup is not None and 0 <= ocup <= 100 and ocup < 100:
+        indicadores.append(f"Agenda de serviços: {_fmt_br(100 - ocup)}% ociosa "
+                           f"({_fmt_br(ocup)}% da capacidade foi preenchida).")
+
+    # MARGEM POR CANAL — a dor nº 1 do Multicanal. `custo_canal` foi convertido para
+    # reais no app exatamente para isto, e a conversão não tinha nada do outro lado.
+    fat_canal = _canais_reais(atual_bruto.get("faturamento_canal"))
+    cus_canal = _canais_reais(atual_bruto.get("custo_canal"))
+    for nome, valor in fat_canal.items():
+        custo = cus_canal.get(nome)
+        if custo is None or valor <= 0:
+            continue
+        sobra = valor - custo
+        indicadores.append(
+            f"Canal {nome}: faturou R$ {_fmt_rs(valor)} e, depois dos custos do canal "
+            f"(R$ {_fmt_rs(custo)}), sobraram R$ {_fmt_rs(sobra)} "
+            f"({_fmt_br(sobra / valor * 100)}% do que vendeu ali).")
+
+    # CONFIANÇA DECLARADA — o campo é obrigatório no app e a dica PROMETE ao lojista
+    # que a análise sai com a ressalva certa. Era a única promessa feita na cara dele
+    # que o produto não cumpria.
+    conf = (atual_bruto.get("confianca_declarada") or "").strip().lower()
+    if conf and not conf.startswith("sim"):
+        radar.append("🟡 Você indicou que os números informados não representam "
+                     "totalmente a realidade — leia as conclusões com essa ressalva.")
     return indicadores, radar
 
 def _normalizar_saida(texto):
@@ -1086,7 +1154,13 @@ def _secao_da_saida(saida, titulo):
 def _teto_da_verba(dados):
     """Maior valor que o cliente declarou ter para melhorias. 'entre R$ 1.000 e
     R$ 2.000' -> 2000. 'não tenho no momento' -> 0. Sem informação -> None."""
-    m = re.search(r"verba_melhorias\s*:\s*(.+)", dados or "", re.I)
+    # 🔴 SÓ O BLOCO ATUAL. Esta função varria o payload INTEIRO, e o app manda a
+    # análise anterior ANTES do marcador — então o teto vinha da verba do mês
+    # passado. Medido: anterior "não tenho" + atual "acima de R$ 2.000" devolvia 0,
+    # e a checagem 4 barrava toda ação por falso positivo. Atingia exatamente o
+    # cliente recorrente, que é o eixo do produto.
+    atual = (dados or "").split("=== DADOS ATUAIS ===", 1)[-1]
+    m = re.search(r"verba_melhorias\s*:\s*(.+)", atual, re.I)
     if not m:
         return None
     texto = m.group(1).strip().lower()
@@ -1094,6 +1168,11 @@ def _teto_da_verba(dados):
         return None
     if re.search(r"n[ãa]o tenho|nenhum|zero|sem verba", texto):
         return 0.0
+    # "Acima de X" declara PISO, não teto. Devolver X dava ao cliente que tem MAIS
+    # dinheiro o mesmo limite do que tem menos, e barrava a ação boa. Sem teto, a
+    # checagem fica declaradamente desligada — que é o que o contrato do campo diz.
+    if re.search(r"acima de|mais de|acima d[oe]", texto):
+        return None
     valores = []
     for bruto in re.findall(r"\d[\d.,]*", texto):
         try:
@@ -1389,7 +1468,9 @@ def gerar_analise(dados, segmento, modelo=None):
         "as duas coisas nesta seção, porque para o dono é o mesmo bolso.\n"
         "Até 4 linhas, cada uma com o número que a prova quando ele existir nos dados:\n"
         "• O QUE SANGRA — custo que subiu mais que a venda, desconto que comeu a margem, "
-        "perda por validade ou defeito.\n"
+        "perda por validade ou defeito. Se o cliente informou ONDE está a melhor e a pior "
+        "margem, use as palavras dele para dizer o que está drenando — e continua PROIBIDO "
+        "afirmar qual é a margem de um item que ele só nomeou.\n"
         "• O QUE ESTÁ PARADO — dinheiro que já foi gasto e não voltou: estoque encalhado, "
         "crédito com fornecedor, devolução pendente. Diga o valor SÓ quando ele estiver nos dados.\n"
         "• O QUE ESTÁ ESBARRANDO — cliente que já está chegando e não fecha: fricção declarada, "
@@ -1401,7 +1482,10 @@ def gerar_analise(dados, segmento, modelo=None):
         f"🚨 {num}. ALERTAS\n"
         "Até 3 riscos latentes que ainda NÃO estão custando dinheiro — se já está custando, "
         "é a seção anterior. Aqui é o que ameaça o próximo ciclo.\n"
-        "Antes de escrever, VARRA os campos de reclamações, trocas/defeitos, fornecedores (atrasos e "
+        "Antes de escrever, VARRA os campos de PRODUTOS VENCENDO (cite o valor e a DATA quando o "
+        "cliente informou — validade sem prazo é descrição, com prazo é alerta), O QUE FALTOU "
+        "(item que o cliente procurou e não havia: quem não encontra compra em outro lugar e "
+        "muitas vezes não volta), reclamações, trocas/defeitos, fornecedores (atrasos e "
         "defeitos recorrentes — cite o nome do fornecedor quando informado, e NUNCA atribua a um fornecedor o defeito "
         "que os dados atribuem a outro) e tendência de queda em qualquer número. "
         "Defeito ou atraso de fornecedor citado nos dados é SEMPRE alerta — mas descreva o FATO ('3 blusas com "
@@ -1411,6 +1495,16 @@ def gerar_analise(dados, segmento, modelo=None):
         "'dependência', 'dependência alta' nem 'risco de dependência'. Canal que cresceu e permanece em 50% ou menos "
         "é OPORTUNIDADE DE CRESCIMENTO, nunca dependência. "
         "Somente se realmente não houver nenhum risco nos dados, escreva apenas: Nenhum alerta crítico neste período."
+        # NOTA FIXA, não alerta condicional: nenhum campo carrega perfil de compra
+        # de acessório, então fingir gatilho seria fabricar precisão. A fonte é
+        # primária (Anatel/gov.br) e o número foi conferido em 05/08.
+        + ("\nNOTA FIXA DESTE SEGMENTO — escreva SEMPRE, como última linha da seção, "
+           "exatamente assim: 'Homologação Anatel: entre janeiro de 2025 e janeiro de "
+           "2026 foram retirados de circulação 1,39 milhão de produtos irregulares, em "
+           "maioria carregadores e roteadores. Confira a homologação do que você "
+           "compra.' Não a transforme em alerta condicional nem altere o número: ela "
+           "não depende dos dados deste cliente."
+           if segmento == "Celular e Acessórios" else "")
     ); num += 1
     secoes.append(f"🎯 {num}. DECISÃO MAIS IMPORTANTE AGORA\nUma única decisão crítica e direta, "
                   f"e ela responde à MAIOR perda apurada na seção anterior."); num += 1
