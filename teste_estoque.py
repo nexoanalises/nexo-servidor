@@ -1,6 +1,8 @@
 # Teste de lógica do extrator de estoque (#083) e da checagem 7 do validador.
 # Não chama a Groq: zero token do teto diário.
 import sys, os, types
+# O console do Windows abre em cp1252 e derruba o teste no primeiro "→".
+sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 # As dependências de produção (flask, gspread, groq…) não estão nesta máquina e não
 # são necessárias: o que se testa é lógica pura de texto. Stub mínimo para importar.
 class _Qq:

@@ -1034,9 +1034,25 @@ def calcular_motor(dados):
     # como fixo, o resto é mercadoria e taxa: é ali que a redução é possível. Sem isto
     # a única saída do produto era mandar o dono "mapear os custos", que é tarefa, não
     # decisão — e o Cânone veta entregar tarefa no lugar de decisão.
+    #
+    # ⚠️ A HIERARQUIA ENTRE AS DUAS FONTES. Esta varredura é INFERÊNCIA sobre texto
+    # livre; `compra_mercadoria` é NÚMERO DECLARADO pelo lojista. As duas publicavam
+    # "custo fixo" na MESMA análise, com valores diferentes e sob rótulos quase
+    # idênticos ("Composição do custo" × "Composição dos custos") — o cliente lia dois
+    # números para a mesma coisa e não tinha como saber qual valia. Declaração ganha de
+    # inferência: havendo o número, a varredura desce a NOMEADORA — entrega os rótulos
+    # que a cifra declarada não tem, e cala a própria cifra.
     if custos and custos > 0:
         fixos, achados = _custos_fixos(atual_bruto)
-        if len(achados) >= 3 and 0 < fixos < custos:
+        declarado = atual.get("compra_mercadoria")
+        if declarado is not None and 0 < declarado <= custos:
+            # E mesmo nomeando, só fala se as duas leituras couberem uma na outra: se o
+            # fixo que ele detalhou já estoura o fixo declarado (custos − compra), as
+            # fontes se contradizem, e o produto cala em vez de escolher uma delas.
+            if achados and 0 < fixos <= custos - declarado:
+                indicadores.append("Composição do custo fixo (pelo que você detalhou): "
+                                   + ", ".join(achados))
+        elif len(achados) >= 3 and 0 < fixos < custos:
             controlaveis = custos - fixos
             indicadores.append(
                 f"Composição do custo (pelo que você detalhou): fixos R$ {_fmt_br(fixos)} "

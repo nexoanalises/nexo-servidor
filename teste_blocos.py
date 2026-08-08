@@ -1,6 +1,8 @@
 # Testes das seções escritas por CÓDIGO (#083): _trocar_secao e _bloco_metas.
 # Zero token: lógica pura.
 import sys, types
+# O console do Windows abre em cp1252 e derruba o teste no primeiro "→".
+sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 class _Qq:
     def __init__(self, *a, **k): self.config = {}
     def __call__(self, *a, **k): return _Qq()

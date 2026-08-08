@@ -2,6 +2,8 @@
 # É ela que justifica o campo `acoes_quais`: sem a seção citar o que foi executado,
 # o campo não teria por que existir. Zero token — só lógica.
 import sys, types, os
+# O console do Windows abre em cp1252 e derruba o teste no primeiro "→".
+sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 class _Qq:
     def __init__(self, *a, **k): self.config = {}
     def __call__(self, *a, **k): return _Qq()

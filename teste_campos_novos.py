@@ -1,6 +1,8 @@
 # Os três campos novos que o servidor passou a ler: compra_mercadoria,
 # recebimento_futuro e ancora_sazonal. Zero token — só Motor.
 import sys, types
+# O console do Windows abre em cp1252 e derruba o teste no primeiro "→".
+sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 class _Qq:
     def __init__(self,*a,**k): self.config={}
     def __call__(self,*a,**k): return _Qq()
