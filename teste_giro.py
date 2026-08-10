@@ -57,8 +57,16 @@ def payload(estoque_atual=None, compra=None, estoque_anterior=None, com_anterior
             "=== DADOS ATUAIS ===\n" + atual)
 
 def giro(dados):
+    """A linha do giro sai do RADAR, não dos indicadores — publicação garantida por
+    código (M3/#082). Procurar nos indicadores aqui deixaria o teste verde enquanto o
+    cliente não veria número nenhum: foi exatamente o que a validação real de 10/08
+    pegou, com o teste determinístico passando."""
+    _, radar = S.calcular_motor(dados)
+    return next((l for l in radar if "Giro do estoque" in l), None)
+
+def indicadores_de(dados):
     ind, _ = S.calcular_motor(dados)
-    return next((l for l in ind if l.startswith("Giro do estoque")), None)
+    return ind
 
 print("\n=== regra da primeira vez (M6): sem período anterior com o dado ===")
 caso("primeira análise do negócio (sem histórico algum): declara ausência",
@@ -110,6 +118,17 @@ caso("usa o declarado do período atual (12.000), não o da prosa (30.000)",
      "12.000" in (comp or ""), True)
 caso("a cifra da prosa (30.000) não vaza para a linha comparativa",
      "30.000" in (comp or ""), False)
+
+print("\n=== a publicação é GARANTIDA por código, não pedida ao modelo (M3/#082) ===")
+d_ok = payload(estoque_atual=22000, compra=20000, estoque_anterior=30000)
+ind_ok = indicadores_de(d_ok)
+caso("a linha do giro NÃO fica só nos indicadores (contexto que o modelo pode ignorar)",
+     any("Giro do estoque" in i for i in ind_ok), False)
+caso("ela está no radar, que _garantir_secao publica literalmente na §1",
+     "Giro do estoque" in (giro(d_ok) or ""), True)
+caso("a declaração de ausência também é publicada, não sussurrada",
+     (giro(payload(estoque_atual=18000, compra=5000, com_anterior=False)) or "").startswith("📦"),
+     True)
 
 print("\n=== estoque_valor entrou em CAMPOS_CRITICOS: preenchimento ilegível avisa ===")
 d_ilegivel = payload(estoque_atual="não sei ao certo", compra=5000, estoque_anterior=30000)

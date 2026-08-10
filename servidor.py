@@ -1230,15 +1230,24 @@ def calcular_motor(dados):
     # inferência da prosa livre): a identidade fecha ou não fecha, não "quase fecha".
     # Cliente que veio da 1.0.2.0 sem `estoque_valor` na análise anterior cai no ramo
     # da primeira vez, e o giro chega assim que houver duas análises com o campo novo.
+    # 🔴 A LINHA VAI PARA O `radar`, NÃO PARA OS `indicadores` — e a distinção é a
+    # regra M3/#082, não preferência de layout. `indicadores` são CONTEXTO que o
+    # modelo narra se quiser; `radar` é publicado LITERALMENTE por código
+    # (`_garantir_secao`). Medido na validação ponta a ponta de 10/08: o giro foi
+    # calculado certo, entrou como indicador, a rodada caiu no fallback e o cliente
+    # não viu o número em lugar nenhum. Cifra que responde "o que parar de comprar"
+    # não pode depender de o modelo lembrar dela. Mesma família de "Composição dos
+    # custos" e "Caixa", que já são radar pelo mesmo motivo.
     est_final = atual.get("estoque_valor")
     est_inicial = ant.get("estoque_valor")
     if est_final is not None and est_final > 0:
         if est_inicial is None:
             # REGRA DA PRIMEIRA VEZ (M6): sem período anterior com o dado, o Motor
             # declara a ausência — e diz quando o número aparece — em vez de calcular
-            # com o que não tem.
-            indicadores.append(
-                "Giro do estoque: ainda não calculável — o NEXO precisa do valor do "
+            # com o que não tem. Publicada também, porque declarar a ausência É
+            # entrega (E6) e porque diz ao lojista o que ele ganha voltando.
+            radar.append(
+                "📦 Giro do estoque: ainda não calculável — o NEXO precisa do valor do "
                 "estoque em duas análises seguidas para medir o que saiu no período. "
                 "A partir da próxima, ele aparece sozinho.")
         elif compra is not None and compra >= 0:
@@ -1253,8 +1262,8 @@ def calcular_motor(dados):
                 cobertura = est_final / saida
                 if _pct_sao(cobertura, limite=60):
                     giro = saida / estoque_medio
-                    indicadores.append(
-                        f"Giro do estoque: R$ {_fmt_rs(saida)} saiu de estoque no período "
+                    radar.append(
+                        f"📦 Giro do estoque: R$ {_fmt_rs(saida)} saiu de estoque no período "
                         f"(giro de {_fmt_br(giro, 2)}x sobre o estoque médio) — no ritmo "
                         f"atual, o estoque de hoje (R$ {_fmt_rs(est_final)}) equivale a "
                         f"{_fmt_br(cobertura, 1)} meses de venda.")
