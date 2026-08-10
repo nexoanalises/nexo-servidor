@@ -338,6 +338,7 @@ ROTULOS_CAMPOS = {
     "proporcao_pet": "Produtos vs Serviços", "proporcao_assistencia": "Vendas vs Assistência técnica",
     "agenda_ocupacao": "Ocupação da agenda de serviços", "funcionarios": "Número de funcionários",
     "estoque_valor": "Valor do estoque hoje",
+    "preocupacao": "O que mais está te preocupando",
 }
 CAMPOS_CRITICOS = ("faturamento", "meta", "custos", "lucro", "ticket_medio", "estoque_valor")
 
@@ -363,6 +364,21 @@ CAMPOS_COMPARAVEIS = (
 # desconto e girei 20% da coleção" somaria 50%. Pior, a dica do próprio app para a
 # capacidade do Pet Shop ("agenda 80% ocupada, loja em 60%") nunca soma 100.
 CAMPOS_RATEIO = ("proporcao_loja", "proporcao_pet", "proporcao_assistencia")
+
+# A PREOCUPAÇÃO DECLARADA (#088) → a grandeza que o Motor já apura para ela.
+# O sinal diz o que é MELHORA: faturamento, lucro e clientes sobem; custos e estoque
+# parado descem. Serve para publicar o FATO ao lado da declaração — nunca para julgar
+# se o lojista escolheu "certo". "Outro" não entra: sem grandeza definida, não há
+# comparação honesta a fazer, e inventar uma seria arbitrar.
+PREOCUPACOES = {
+    "vendas":   ("faturamento",   "o faturamento",         +1),
+    "lucro":    ("lucro",         "o lucro",               +1),
+    "estoque":  ("estoque_valor", "o estoque parado",      -1),
+    "clientes": ("clientes",      "o número de clientes",  +1),
+    # "o custo total" e não "os custos": o verbo da frase é sempre singular
+    # ("subiu"/"caiu"), e "os custos subiu" ia sair no Radar do cliente.
+    "custos":   ("custos",        "o custo total",         -1),
+}
 
 def _pct_do_texto(p):
     """'70,5' -> 70.5 · '1.250' -> 1250.0. Ponto só é milhar com 3 casas depois."""
@@ -1300,6 +1316,31 @@ def calcular_motor(dados):
                 linha += f", enquanto R$ {_fmt_rs(compra)} já saíram em mercadoria"
             radar.append(linha + ".")
 
+    # ── A PREOCUPAÇÃO DECLARADA — LENTE DE COLETA, JAMAIS DIAGNÓSTICO ───────────
+    # Trava 3 do veredito (#088), e ela é escrita em CÓDIGO de propósito: pedir ao
+    # modelo que "não conclua pela preocupação do cliente" é instrução, e instrução
+    # sobre enquadramento falha do mesmo jeito que falhava sobre número (#083). O que
+    # se garante aqui é o FATO publicado ao lado da declaração — se o lojista aponta
+    # estoque e o estoque caiu 26,7%, isso sai no Radar por código, mesmo que o modelo
+    # escreva um diagnóstico de estoque logo abaixo. O produto deixa de ser espelho da
+    # opinião do cliente sem depender da boa vontade do Intérprete.
+    declarada = (atual_bruto.get("preocupacao") or "").strip()
+    if declarada:
+        linha = f"🎯 Sua maior preocupação declarada: {declarada.upper()}."
+        alvo = next((v for k, v in PREOCUPACOES.items() if k in declarada.lower()), None)
+        if alvo:
+            campo, rotulo, sentido = alvo
+            a, b = atual.get(campo), ant.get(campo)
+            if a is not None and b:
+                delta = (a - b) / abs(b) * 100
+                if _pct_sao(delta) and abs(delta) >= 0.1:
+                    direcao = "subiu" if delta > 0 else "caiu"
+                    linha += (f" Nos números apurados, {rotulo} {direcao} "
+                              f"{_fmt_br(abs(delta))}% desde a análise anterior.")
+        linha += (" O diagnóstico abaixo segue os números apurados, não a preocupação "
+                  "declarada.")
+        radar.append(linha)
+
     # ── A ÂNCORA SAZONAL ────────────────────────────────────────────────────────
     # Sem ela o NEXO compara mês contra mês anterior e nada mais: uma loja de roupas
     # comparando janeiro com dezembro parece catástrofe todo ano. Não é imprecisão —
@@ -2019,6 +2060,13 @@ def gerar_analise(dados, segmento, modelo=None):
                 f"coleção anterior, diga explicitamente que o lucro não desapareceu, ele VIROU ESTOQUE — com os dois valores "
                 f"lado a lado (quanto foi comprado × quanto está parado).\n"
                 f"- Nunca trate 'margem apertada' como causa. Margem apertada é sintoma; a causa é onde o dinheiro entrou.\n\n"
+
+                f"🎯 A PREOCUPAÇÃO DECLARADA É LENTE DE COLETA, NÃO DIAGNÓSTICO. O campo 'preocupacao' diz o que "
+                f"o dono TEME, não o que os dados MOSTRAM. Ele serve para você entender o que aflige o lojista — "
+                f"nunca como conclusão pronta. Se os números apontarem outra causa, o diagnóstico segue os NÚMEROS "
+                f"e explica a diferença em uma frase. Ex.: o dono aponta ESTOQUE, e o estoque caiu enquanto a margem "
+                f"encolheu — então o diagnóstico é da margem, e você diz que o estoque melhorou. "
+                f"É PROIBIDO abrir o diagnóstico repetindo a preocupação declarada como se fosse achado seu.\n\n"
 
                 f"🔁 NÃO RECOMENDE O QUE JÁ FOI TENTADO: varre os campos de desafios e observações antes de decidir. "
                 f"Se o dono declarou ter feito algo (ex.: 'dei muito desconto'), NÃO recomende a mesma coisa. "
