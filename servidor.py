@@ -1451,16 +1451,45 @@ def _numeros_de(texto):
     return {m.group().replace(".", "") for m in _RE_NUM.finditer(texto or "")}
 
 def _secao_da_saida(saida, titulo):
-    """Corpo de uma seção da resposta, localizada pelo título numerado."""
-    dentro, corpo = False, []
-    for linha in (saida or "").split("\n"):
-        limpa = re.sub(r"^[^\w\d]*", "", linha).strip()
-        if re.match(r"^\d+\.\s", limpa):
-            dentro = titulo.lower() in limpa.lower()
+    """Corpo de uma seção da resposta, pelo MESMO teste de título que estrutura a
+    análise — `_parece_titulo`, que exige MAIÚSCULAS.
+
+    🔴 O QUE ESTAVA ERRADO, e por que passou despercebido. Esta função tinha um parser
+    PRÓPRIO, e ele era ingênuo: qualquer linha `^\\d+\\.\\s` virava título de seção. Ele
+    achava "7. AÇÕES IMEDIATAS", entrava — e a linha seguinte, "1. Revisar a formação
+    de preço…", casava com o mesmo padrão e a FECHAVA na hora. A seção de ações chegava
+    sempre VAZIA ao validador, e com ela morriam duas checagens:
+      · a 4 — ação sem prazo, e ação acima da verba que o cliente informou;
+      · a 5 — decisão principal sem ação correspondente.
+    Medido em produção 10/08, nos três ambientes da rodada: `acoes=0` em todos. Efeito
+    real: verba declarada de "Até R$ 500" e o produto recomendando "(Custo: R$ 1.000)"
+    sem ninguém barrar. E o pior de tudo é que a trava aparecia como instalada — testes
+    verdes, documentação citando "a verba barra" — que é a definição do #085: trava que
+    não roda ocupa o lugar da vigilância sem exercê-la.
+
+    ⚠️ E a correção não é tratar o caso "1." — é PARAR DE TER DOIS PARSERS. O
+    `_em_secoes` já resolvia isto desde 05/08, com o teste de maiúsculas, e o comentário
+    dele diz exatamente que "1. Definir o preço de saída" tem de ser recusado. Duas
+    implementações da mesma leitura, uma certa e outra errada, é a doença que o #083
+    nomeia para número — aqui ela apareceu para estrutura.
+
+    Devolve as linhas BRUTAS (com o marcador que o modelo escreveu), porque a checagem 1
+    compara o texto da meta com a linha original da saída — sem o marcador, a comparação
+    falharia e as metas voltariam a ser varridas como número sem fonte."""
+    alvo = (titulo or "").lower()
+    linhas = (saida or "").split("\n")
+    # Onde estão os títulos DE VERDADE, pelo mesmo critério da estruturação.
+    inicios = []
+    for i, linha in enumerate(linhas):
+        m = _RE_TITULO_SECAO.match(linha)
+        if m and _parece_titulo(m.group(2)):
+            inicios.append((i, m.group(2)))
+    for pos, (i, nome) in enumerate(inicios):
+        if alvo not in nome.lower():
             continue
-        if dentro and linha.strip():
-            corpo.append(linha.strip())
-    return corpo
+        fim = inicios[pos + 1][0] if pos + 1 < len(inicios) else len(linhas)
+        return [l.strip() for l in linhas[i + 1:fim] if l.strip()]
+    return []
 
 def _teto_da_verba(dados):
     """Maior valor que o cliente declarou ter para melhorias. 'entre R$ 1.000 e
