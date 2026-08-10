@@ -467,11 +467,14 @@ def _conferir_somas_percentuais(brutos):
 # antes de faturamento/meta/custos/lucro) e que antes vencia o valor real.
 ORDEM_CAMPOS_GERAIS = (
     "nome_negocio", "periodo", "objetivo_principal", "faturamento", "meta",
-    "custos", "lucro", "verba_melhorias", "tempo_disponivel", "funcionarios",
+    "custos", "lucro", "verba_melhorias", "funcionarios",
     # `canais` saiu do formulário em 06/08 (o `vendas_canal` já nomeia os canais).
-    # Fica fora daqui também: chave morta nesta lista faz ela mentir sobre o
-    # formulário. A 1.0.2.0 instalada ainda manda o campo — e ele continua sendo
-    # aceito, só que pelo caminho livre, sem exigência de ordem.
+    # `tempo_disponivel` saiu em 10/08 (#087): o prompt prometia respeitá-lo e nenhum
+    # código conferia — e o fiscal exigiria precificar cada ação em horas, conta que
+    # ninguém sabe fazer. As quatro instruções que o citavam saíram no mesmo ato.
+    # Ficam fora daqui também: chave morta nesta lista faz ela mentir sobre o
+    # formulário. A 1.0.2.0 instalada ainda manda os campos — e eles continuam sendo
+    # aceitos, só que pelo caminho livre, sem exigência de ordem.
     "capacidade", "vendas_canal", "desafios", "observacoes",
 )
 _POSICAO = {k: i for i, k in enumerate(ORDEM_CAMPOS_GERAIS)}
@@ -1692,7 +1695,7 @@ def gerar_analise(dados, segmento, modelo=None):
                   f"e ela responde à MAIOR perda apurada na seção anterior."); num += 1
     secoes.append(
         f"🔧 {num}. AÇÕES IMEDIATAS\n"
-        "No máximo 3 ações práticas, executáveis e simples, compatíveis com a verba e o tempo informados. "
+        "No máximo 3 ações práticas, executáveis e simples, compatíveis com a verba informada. "
         "Cada ação obedece à REGRA DA ALAVANCA NOMEADA: alavanca + alvo + direção, com número. "
         "Se os dados citam DEFEITO ou ATRASO de fornecedor, uma das ações é ACIONAR esse fornecedor "
         "(troca, crédito ou substituição das peças, com o nome dele e a quantidade que está nos dados) — "
@@ -1784,7 +1787,6 @@ def gerar_analise(dados, segmento, modelo=None):
                 f"- Proibido sugerir consultorias, agências ou consultores externos. O NEXO É o consultor do cliente.\n"
                 f"- Proibido respostas teóricas sem ação prática.\n"
                 f"- Proibido ignorar a verba disponível.\n"
-                f"- Proibido ignorar o tempo disponível.\n"
                 f"- Proibido recomendações impossíveis de executar pelo próprio dono.\n"
                 f"- Sempre priorize simplicidade e execução imediata.\n"
                 f"- Sempre use linguagem direta e de ação — e TODO verbo carrega ALVO NOMEADO.\n"
@@ -1923,14 +1925,12 @@ def gerar_analise(dados, segmento, modelo=None):
                 f"FORMATO OBRIGATÓRIO DE SAÍDA (use exatamente estes títulos, nesta ordem):\n\n"
                 f"{formato}\n\n"
                 f"PRIORIZAÇÃO INTERNA (NÃO EXIBIR AO USUÁRIO): antes de responder, avalie cada ação possível por impacto no resultado, "
-                f"facilidade de execução, custo em relação à verba disponível e consumo do tempo semanal disponível. "
-                f"Priorize sempre alto impacto + alta facilidade + baixo custo + baixo consumo de tempo. "
+                f"facilidade de execução e custo em relação à verba disponível. "
+                f"Priorize sempre alto impacto + alta facilidade + baixo custo. "
                 f"Apresente ao usuário apenas as ações já priorizadas — nunca mostre pontuações, notas ou cálculos.\n\n"
                 f"RESTRIÇÃO DE ORÇAMENTO: respeite estritamente o campo 'Verba destinada para melhorias'. "
                 f"Se a verba for baixa, nula ou não informada, recomende apenas ações de custo zero ou muito baixo "
                 f"(ajustes de processo, ações orgânicas, renegociação, organização interna, ferramentas gratuitas).\n\n"
-                f"RESTRIÇÃO DE TEMPO: respeite estritamente o campo 'Tempo disponível para implementação'. "
-                f"Nenhuma ação pode exigir, por semana, mais tempo do que o informado pelo cliente.\n\n"
                 f"✅ VERIFICAÇÃO FINAL OBRIGATÓRIA — releia a resposta inteira antes de entregar e confirme:\n"
                 f"- Nenhuma palavra em outro idioma, nenhuma frase interrompida no meio.\n"
                 f"- Nenhum marcador de sistema no texto ('(leitura)', '(calculado)', '(fato)').\n"
