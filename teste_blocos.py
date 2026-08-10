@@ -84,8 +84,14 @@ caso("declara a ausencia, nao inventa", "não informou meta" in sm, True)
 print("\n=== _bloco_metas — com estoque lido ===")
 ce = "\n".join(S._bloco_metas(JUNHO.replace(
     "saindo devagar.", "saindo devagar, tem R$ 13.000 a preco de custo parados.")))
-caso("meta de estoque aparece rotulada",
-     "R$ 13.000 para menos da metade" in ce and "sugerida pelo NEXO" in ce, True)
+# O ALVO PASSOU A SER NUMÉRICO em 10/08. A redação antiga ("para menos da metade")
+# reprovava na checagem 2 do próprio validador, que exige "de [atual] para [alvo]" com
+# os dois números — e como esta linha é escrita por código e reposta a cada tentativa,
+# o modelo não tinha como consertar: a análise caía no fallback toda vez que houvesse
+# valor de estoque. Ficou latente enquanto a cifra vinha do texto livre; virou
+# permanente com o `estoque_valor` estruturado (#088).
+caso("meta de estoque aparece rotulada, com alvo numérico",
+     "de R$ 13.000 para R$ 6.500" in ce and "sugerida pelo NEXO" in ce, True)
 
 print("\n=== _substituir_secao com o bloco de metas ===")
 sec = S._em_secoes(SAIDA_REAL)

@@ -830,10 +830,19 @@ def _bloco_metas(dados):
                           f"— meta sugerida pelo NEXO, calculada com o faturamento acima e a "
                           f"margem de hoje.")
 
+    # 🔴 O ALVO É NUMÉRICO, e isso não é preciosismo de redação: a régua do próprio
+    # validador (checagem 2) exige "de [atual] para [alvo]" com os DOIS números. Esta
+    # linha dizia "para menos da metade" — alvo em texto — e reprovava. Como ela é
+    # escrita por CÓDIGO e reposta por `_entregar` a cada tentativa, o modelo não tinha
+    # como consertar: reprovava na 1ª, reprovava na 2ª, e a análise caía no fallback.
+    # 🟢 Medido em produção 10/08 19:30 (VALIDADOR|saida-2a-tentativa|ativa|meta sem
+    # ponto de partida). Ficou latente enquanto a cifra do estoque dependia de o
+    # cliente escrevê-la no texto livre; com `estoque_valor` estruturado (#088) passou
+    # a valer para TODA análise com estoque preenchido.
     v_est = _valor_estoque(dados)[0]
     if v_est:
-        linhas.append(f"• Estoque parado: de R$ {_fmt_rs(v_est)} para menos da metade "
-                      f"— meta sugerida pelo NEXO com base no estoque que você informou.")
+        linhas.append(f"• Estoque parado: de R$ {_fmt_rs(v_est)} para R$ {_fmt_rs(v_est / 2)} "
+                      f"— meta sugerida pelo NEXO, metade do estoque que você informou.")
 
     if not linhas:
         return []
@@ -1603,7 +1612,24 @@ def validar_saida(saida, dados, indicadores, radar):
     # número que ESTÁ nos dados mas está no lugar errado (o R$ 21.000 da compra da
     # coleção citado como se fosse o valor parado).
     valor_estoque = _valor_estoque(dados)[0]
+    # 🔴 O VALIDADOR JULGA O QUE O MODELO ESCREVEU — NUNCA O QUE O CÓDIGO PUBLICOU.
+    # Linha do Radar entra no texto final literalmente (`_garantir_secao`), então
+    # varrê-la é auditar a própria apuração. E dava falso positivo real: o `📦 Giro do
+    # estoque: R$ 28.000 saiu...` era acusado de "cifra de estoque diferente da
+    # informada" porque 28.000 (a SAÍDA do período) está perto da palavra estoque e
+    # difere dos 22.000 parados. Medido em produção 10/08 19:30. Marcado `observa`, não
+    # bloqueava — mas poluía o log e bloquearia no dia em que a checagem 7 fosse
+    # promovida, que é justamente o que a fase de observação existe para decidir.
+    # Radar E Metas: as duas seções que `_entregar` repõe por código. Buscar as metas
+    # aqui, em vez de recebê-las por parâmetro, é de propósito — assim a isenção não
+    # depende de quem chama lembrar de passá-las, e não há como o defeito voltar por
+    # esquecimento numa chamada nova.
+    def _sem_marca(l):
+        return l.strip().lstrip("•").strip()
+    publicadas = {_sem_marca(l) for l in radar} | {_sem_marca(l) for l in _bloco_metas(dados)}
     for linha in (saida or "").split("\n"):
+        if _sem_marca(linha) in publicadas:
+            continue
         for m in _RE_CIFRA_ESTOQUE.finditer(linha):
             if m.group(2):                                  # percentual: outra regra
                 continue

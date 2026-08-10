@@ -130,6 +130,33 @@ caso("a declaração de ausência também é publicada, não sussurrada",
      (giro(payload(estoque_atual=18000, compra=5000, com_anterior=False)) or "").startswith("📦"),
      True)
 
+print("\n=== o validador não pode reprovar o que o próprio código publicou ===")
+# Os dois defeitos que só a rodada real de 10/08 revelou, e que os testes
+# determinísticos anteriores não pegavam porque nenhum deles montava a saída final.
+d_ok = payload(estoque_atual=22000, compra=20000, estoque_anterior=30000)
+ind_r, radar_r = S.calcular_motor(d_ok)
+metas = S._bloco_metas(d_ok)
+saida_publicada = "1. RADAR DO NEGÓCIO\n" + "\n".join(radar_r) + \
+                  "\n\n8. METAS ATÉ A PRÓXIMA ANÁLISE\n" + "\n".join(metas)
+regras = [x["regra"] for x in S.validar_saida(saida_publicada, d_ok, ind_r, radar_r)]
+
+caso("a linha do giro não é acusada de 'cifra de estoque diferente da informada'",
+     "cifra de estoque diferente da informada" in regras, False)
+caso("a meta de estoque não é acusada de 'meta sem ponto de partida'",
+     "meta sem ponto de partida" in regras, False)
+caso("nenhuma violação ATIVA no que o código publica — senão a análise cai no fallback",
+     [x["regra"] for x in S.validar_saida(saida_publicada, d_ok, ind_r, radar_r)
+      if not x.get("observa")], [])
+
+print("\n=== a meta de estoque escreve alvo NUMÉRICO (régua da checagem 2) ===")
+linha_meta = next((l for l in metas if "Estoque parado" in l), None)
+caso("a meta existe", linha_meta is not None, True)
+caso("parte de R$ 22.000", "de R$ 22.000" in (linha_meta or ""), True)
+caso("e chega a R$ 11.000, metade — não 'menos da metade'",
+     "para R$ 11.000" in (linha_meta or ""), True)
+caso("com a procedência declarada (#082)",
+     "sugerida pelo NEXO" in (linha_meta or ""), True)
+
 print("\n=== estoque_valor entrou em CAMPOS_CRITICOS: preenchimento ilegível avisa ===")
 d_ilegivel = payload(estoque_atual="não sei ao certo", compra=5000, estoque_anterior=30000)
 _, radar_ilegivel = S.calcular_motor(d_ilegivel)
