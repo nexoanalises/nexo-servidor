@@ -337,8 +337,9 @@ ROTULOS_CAMPOS = {
     "proporcao_loja": "Percentual de vendas: Roupas vs Calçados", "vendas_canal": "Vendas por canal",
     "proporcao_pet": "Produtos vs Serviços", "proporcao_assistencia": "Vendas vs Assistência técnica",
     "agenda_ocupacao": "Ocupação da agenda de serviços", "funcionarios": "Número de funcionários",
+    "estoque_valor": "Valor do estoque hoje",
 }
-CAMPOS_CRITICOS = ("faturamento", "meta", "custos", "lucro", "ticket_medio")
+CAMPOS_CRITICOS = ("faturamento", "meta", "custos", "lucro", "ticket_medio", "estoque_valor")
 
 # Todo campo numérico que o formulário pede é comparável entre períodos. O tipo
 # manda na conta: percentual varia em PONTOS, dinheiro e quantidade variam em %.
@@ -354,6 +355,7 @@ CAMPOS_COMPARAVEIS = (
     ("fornecedores", "Fornecedores no prazo",    "percentual"),
     ("agenda_ocupacao", "Ocupação da agenda",    "percentual"),
     ("recorrentes",  "Clientes recorrentes",     "quantidade"),
+    ("estoque_valor", "Estoque parado",          "dinheiro"),
 )
 
 # SÓ estes campos são RATEIO — a soma deles tem de fechar 100%. Rodar a conferência
@@ -630,6 +632,25 @@ def _valor_do_estoque(dados):
         return None, "o valor informado não pôde ser lido"
     return v, "ok"
 
+def _valor_estoque(dados):
+    """Devolve (valor, motivo) — a cifra do estoque que o resto do produto usa para
+    NARRAR (meta, prompt, validador). DECLARAÇÃO GANHA DE INFERÊNCIA (#085 M4):
+    primeiro tenta `estoque_valor` (#088) — campo numérico próprio, sem ambiguidade
+    de parsing. Só cai para `_valor_do_estoque` — regex sobre o texto livre de
+    `estoque` — quando o campo novo não veio: é o caminho que a 1.0.2.0 instalada
+    ainda percorre, porque ela não manda `estoque_valor`.
+    ⚠️ NÃO é a função que o GIRO usa (`calcular_motor`, bloco GIRO) — o giro exige
+    o valor DECLARADO nas DUAS pontas (hoje e a análise anterior); aceitar inferência
+    aqui bastaria para narrar "o estoque parado é X", mas não para fechar uma
+    identidade contábil entre dois períodos."""
+    texto = _texto_do_campo(dados, "estoque_valor")
+    if texto:
+        v = _num_br(texto)
+        if v is not None and v > 0:
+            return v, "ok"
+        return None, "o valor do estoque não pôde ser lido"
+    return _valor_do_estoque(dados)
+
 # Frase do degrau 3, definida pelo fundador em 05/08. Sai daqui, literal, para o
 # prompt e para o validador — uma redação só, num lugar só.
 FRASE_ESTOQUE_SEM_VALOR = ("Foi identificado estoque parado, mas não foi possível determinar "
@@ -809,7 +830,7 @@ def _bloco_metas(dados):
                           f"— meta sugerida pelo NEXO, calculada com o faturamento acima e a "
                           f"margem de hoje.")
 
-    v_est = _valor_do_estoque(dados)[0]
+    v_est = _valor_estoque(dados)[0]
     if v_est:
         linhas.append(f"• Estoque parado: de R$ {_fmt_rs(v_est)} para menos da metade "
                       f"— meta sugerida pelo NEXO com base no estoque que você informou.")
@@ -1196,6 +1217,52 @@ def calcular_motor(dados):
                 f"({_fmt_br(pct)}% dos custos) e R$ {_fmt_rs(fixo)} é custo fixo e "
                 f"despesa. O dinheiro que virou estoque não sumiu — está na prateleira.")
 
+    # ── O GIRO — a identidade do estoque, calculada em código (#088 · dados.md M6) ──
+    # "O que devo comprar menos, comprar mais ou parar de comprar?" (veredito do
+    # fundador) se responde pela identidade contábil: saída do período = estoque
+    # INICIAL + compra de mercadoria − estoque FINAL. O inicial é o estoque final da
+    # análise ANTERIOR — já vive no histórico local; dado que já está na casa não se
+    # pergunta de novo (M6). O "do quê" já tem dono (`produtos_baixo` nomeia o que
+    # não gira); faltava só a cifra, e agora ela é DECLARADA (`estoque_valor`), não
+    # inferida de prosa — as duas pontas do tempo usam a MESMA fonte.
+    #
+    # ⚠️ Exige o valor DECLARADO nas duas pontas — não usa `_valor_estoque` (que aceita
+    # inferência da prosa livre): a identidade fecha ou não fecha, não "quase fecha".
+    # Cliente que veio da 1.0.2.0 sem `estoque_valor` na análise anterior cai no ramo
+    # da primeira vez, e o giro chega assim que houver duas análises com o campo novo.
+    est_final = atual.get("estoque_valor")
+    est_inicial = ant.get("estoque_valor")
+    if est_final is not None and est_final > 0:
+        if est_inicial is None:
+            # REGRA DA PRIMEIRA VEZ (M6): sem período anterior com o dado, o Motor
+            # declara a ausência — e diz quando o número aparece — em vez de calcular
+            # com o que não tem.
+            indicadores.append(
+                "Giro do estoque: ainda não calculável — o NEXO precisa do valor do "
+                "estoque em duas análises seguidas para medir o que saiu no período. "
+                "A partir da próxima, ele aparece sozinho.")
+        elif compra is not None and compra >= 0:
+            saida = est_inicial + compra - est_final
+            estoque_medio = (est_inicial + est_final) / 2
+            # Números não fecham: o estoque final maior do que inicial+compra
+            # explicariam não produz giro negativo — cala, mesma família da checagem
+            # de faturamento/custos/lucro acima. E é a COBERTURA que explode quando a
+            # saída é quase zero (divisão por um número pequeno) — o teto de sanidade
+            # é nela, não no giro, que não tem essa fragilidade.
+            if saida > 0 and estoque_medio > 0:
+                cobertura = est_final / saida
+                if _pct_sao(cobertura, limite=60):
+                    giro = saida / estoque_medio
+                    indicadores.append(
+                        f"Giro do estoque: R$ {_fmt_rs(saida)} saiu de estoque no período "
+                        f"(giro de {_fmt_br(giro, 2)}x sobre o estoque médio) — no ritmo "
+                        f"atual, o estoque de hoje (R$ {_fmt_rs(est_final)}) equivale a "
+                        f"{_fmt_br(cobertura, 1)} meses de venda.")
+            # saída <= 0 ou cobertura fora da faixa de sanidade: campo mal preenchido
+            # produziria giro sem sentido — cala em vez de publicar.
+        # compra ausente: a identidade não fecha sem as três pernas — cala em
+        # silêncio, mesmo padrão de qualquer outra conta condicional do Motor.
+
     # ── O EIXO DO CAIXA ─────────────────────────────────────────────────────────
     # D06: "meu faturamento cresce e o caixa continua apertado". Faturamento, custos
     # e lucro são COMPETÊNCIA; caixa é quando o dinheiro entra. Quem vende em 12x
@@ -1526,7 +1593,7 @@ def validar_saida(saida, dados, indicadores, radar):
     # é justamente onde a cifra do estoque reaparece — e pega o que ela não vê:
     # número que ESTÁ nos dados mas está no lugar errado (o R$ 21.000 da compra da
     # coleção citado como se fosse o valor parado).
-    valor_estoque = _valor_do_estoque(dados)[0]
+    valor_estoque = _valor_estoque(dados)[0]
     for linha in (saida or "").split("\n"):
         for m in _RE_CIFRA_ESTOQUE.finditer(linha):
             if m.group(2):                                  # percentual: outra regra
@@ -1753,7 +1820,7 @@ def gerar_analise(dados, segmento, modelo=None):
     # Certeza usa, dúvida cala. A instrução abaixo é o pedido; a garantia é a
     # checagem 7 do validador, porque instrução de prompt sobre número já provou
     # não bastar (o PDF de agosto saiu com 16,8% tendo "reproduza exatamente" escrito).
-    valor_estoque, motivo_estoque = _valor_do_estoque(dados)
+    valor_estoque, motivo_estoque = _valor_estoque(dados)
     if valor_estoque is not None:
         bloco_motor += (f"ESTOQUE PARADO — VALOR LIDO DO QUE O CLIENTE ESCREVEU: "
                         f"R$ {_fmt_br(valor_estoque)}.\n"
@@ -1974,7 +2041,7 @@ def gerar_analise(dados, segmento, modelo=None):
         # O degrau 3 não pode depender de o modelo acertar a seção: em 05/08 ele pôs
         # a frase no Radar, e a substituição do Radar a levou junto. Agora ela é
         # colocada por código, onde a perda é discutida.
-        if _valor_do_estoque(dados)[0] is None:
+        if _valor_estoque(dados)[0] is None:
             for sec in secoes:
                 titulo = (sec["titulo"] or "").upper()
                 if "PERDER DINHEIRO" in titulo or "CUSTANDO DINHEIRO" in titulo:

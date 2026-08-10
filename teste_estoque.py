@@ -70,6 +70,22 @@ caso("campo vazio -> cala",
 caso("centavos: R$ 18.000,50 -> usa",
      S._valor_do_estoque(payload("tem R$ 18.000,50 a preco de custo parado"))[0], 18000.50)
 
+print("\n=== _valor_estoque (#088) — DECLARAÇÃO GANHA DE INFERÊNCIA (M4) ===")
+def payload_com_valor(estoque_valor, texto_estoque):
+    return ("Segmento: Loja / Varejo e Moda\nnome_negocio: Loja da Bia\n"
+            "faturamento: R$ 56.350\ncustos: R$ 46.900\nlucro: R$ 9.450\n"
+            f"estoque_valor: {estoque_valor}\n"
+            f"estoque: {texto_estoque}\n")
+
+caso("campo declarado presente: usa ELE, ignora a prosa com outra cifra",
+     S._valor_estoque(payload_com_valor(12000, "tem uns R$ 30.000 encalhados"))[0], 12000.0)
+caso("campo declarado ausente: cai para a inferência antiga (compatível com a 1.0.2.0)",
+     S._valor_estoque(payload(JULHO))[0], 18000.0)
+caso("campo declarado preenchido mas ilegível: cala — NÃO cai para a prosa",
+     S._valor_estoque(payload_com_valor("um tanto", "tem R$ 18.000 parado"))[0], None)
+caso("campo declarado vazio (só a chave, sem valor): cai para a inferência",
+     S._valor_estoque("Segmento: X\nestoque_valor: \nestoque: R$ 9.000 parado\n")[0], 9000.0)
+
 print("\n=== _texto_do_campo — multilinha e fronteira de campo ===")
 multi = ("estoque: Cheio.\nA colecao Outono tem R$ 18.000 parados.\n"
          "encalhados: Blazer\n")
