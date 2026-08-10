@@ -4,7 +4,7 @@ from google.oauth2.service_account import Credentials
 import random
 import re
 import string
-from datetime import datetime
+from datetime import datetime, timedelta
 from dateutil.relativedelta import relativedelta
 import os
 import json
@@ -64,11 +64,21 @@ MODELOS_PERMITIDOS = {
 }
 
 PLANOS = {
+    # O "7" é o primeiro ciclo da oferta de entrada. Sem ele a venda de R$7 caía no
+    # padrão do webhook e era registrada como "mensal" — chave válida, mas a planilha
+    # deixava de distinguir quem entrou por R$7 de quem entrou por R$47, que é
+    # exatamente a medição que a oferta existe para produzir.
+    "7":   ("ativacao",    1,  "months"),
     "97":  ("lancamento",  0,  "forever"),
     "47":  ("mensal",      1,  "months"),
     "297": ("anual",       12, "months"),
     "697": ("definitivo",  0,  "forever"),
 }
+
+# Cobrança que atrasa não pode derrubar quem está em dia: a validade gravada leva
+# alguns dias a mais que o ciclo pago. A folga é descontada antes de cada renovação
+# (ver `validade_renovada`), senão ela se acumularia mês a mês.
+FOLGA_RENOVACAO_DIAS = 5
 
 # ─── FUNÇÕES ────────────────────────────────────────────────────────────────────
 
@@ -86,11 +96,14 @@ def gerar_chave():
     chars = string.ascii_uppercase + string.digits
     return "NEXO-" + "".join(random.choices(chars, k=4)) + "-" + "".join(random.choices(chars, k=4))
 
+def _com_folga(base, meses):
+    return (base + relativedelta(months=meses) + timedelta(days=FOLGA_RENOVACAO_DIAS)).strftime("%Y-%m-%d")
+
 def calcular_expiracao(plano_valor):
     _, quantidade, unidade = PLANOS.get(plano_valor, ("mensal", 1, "months"))
     if unidade == "forever":
         return "definitivo"
-    return (datetime.now() + relativedelta(months=quantidade)).strftime("%Y-%m-%d")
+    return _com_folga(datetime.now(), quantidade)
 
 def registrar_chave(chave, plano_nome, expiracao, cliente, email_cliente):
     ws = conectar_sheets()
@@ -103,6 +116,103 @@ def registrar_chave(chave, plano_nome, expiracao, cliente, email_cliente):
         datetime.now().strftime("%d/%m/%Y %H:%M"),
         email_cliente
     ], table_range="A1:G1")
+
+# ─── RENOVAÇÃO ──────────────────────────────────────────────────────────────────
+# A recorrência da Eduzz cobra o cliente todo mês e cai NESTE MESMO webhook. Sem o
+# que vem abaixo, cada cobrança gerava uma chave NOVA numa linha NOVA — e a linha do
+# cliente ficava parada na validade do primeiro ciclo. No dia seguinte ao vencimento
+# o app apagava a licença local e mandava comprar de novo: cliente em dia, cobrança
+# em dia, deslogado. Nunca apareceu porque nunca houve um pagante.
+#
+# O conserto é só de servidor: o app revalida contra a planilha a cada 24h e regrava
+# a validade que encontrar (`nexo_analise.py:266-288`). Movendo a data da linha que
+# já existe, a licença se estende sozinha e o cliente não vê nada acontecer.
+
+def achar_linha_renovavel(valores, email_cliente):
+    """(índice 1-based, linha) do registro que uma renovação deve estender.
+
+    Renovável = mesmo e-mail · ativo · com data de validade. Varre de baixo para cima
+    porque o registro que vale é o último. Vitalícia devolve "não achei" de propósito:
+    não se estende o que não vence, e ninguém com vitalícia vira mensal por engano.
+    """
+    alvo = (email_cliente or "").strip().lower()
+    if not alvo:
+        return None, None
+    for i in range(len(valores), 1, -1):        # para em 2: a linha 1 é o cabeçalho
+        linha = valores[i - 1]
+        if len(linha) < 7 or linha[6].strip().lower() != alvo:
+            continue
+        if linha[3].strip().lower() != "sim":
+            continue
+        if linha[2].strip().lower() == "definitivo":
+            return None, None
+        return i, linha
+    return None, None
+
+def validade_renovada(validade_atual, meses, hoje=None):
+    """A data que a renovação grava na linha do cliente.
+
+    Conta do FIM DO CICLO PAGO, não da data que está na planilha: a folga é descontada
+    antes e somada de novo depois, senão ela cresceria a cada mês (5, 10, 15 dias...)
+    e o dia do vencimento fugiria do dia da cobrança.
+
+    Validade vencida — ou ilegível — renova a partir de hoje: quem pagou com atraso
+    recebe o ciclo inteiro contado do pagamento, nunca menos do que comprou.
+    """
+    base = hoje or datetime.now()
+    try:
+        fim_do_ciclo = datetime.strptime(str(validade_atual).strip(), "%Y-%m-%d") - timedelta(days=FOLGA_RENOVACAO_DIAS)
+        if fim_do_ciclo > base:
+            base = fim_do_ciclo
+    except ValueError:
+        pass                                    # data que a planilha não explica: vale hoje
+    return _com_folga(base, meses)
+
+def renovar_validade(ws, indice, validade_nova):
+    """Move a validade da linha existente. A CHAVE não muda — é a mesma que já está
+    instalada na máquina do cliente. O PLANO também não: ele registra por onde o
+    cliente ENTROU (`ativacao` = R$7), e sobrescrever apagaria a única medição que
+    diz quantos R$7 viraram R$47. Quantos ciclos ele já pagou está na distância
+    entre a data de registro (coluna F) e esta validade."""
+    ws.update_cell(indice, 3, validade_nova)    # coluna C = expiracao
+
+def enviar_email_renovacao(email_cliente, nome_cliente, chave, validade):
+    corpo = f"""
+Olá, {nome_cliente}!
+
+Sua assinatura do NEXO Análise foi renovada.
+
+━━━━━━━━━━━━━━━━━━━━━━━━
+🔑 CHAVE: {chave} (a mesma de sempre)
+📅 Válida até: {validade}
+━━━━━━━━━━━━━━━━━━━━━━━━
+
+Você não precisa fazer nada: o NEXO reconhece a renovação sozinho na próxima vez que
+você abrir o app. A chave continua a mesma — não é preciso ativar de novo.
+
+Qualquer dúvida, é só escrever pra contato@nexosoft.com.br — eu leio e respondo cada mensagem.
+
+Boas análises!
+Ricardo — NEXO Análise
+contato@nexosoft.com.br
+"""
+
+    resposta = requests.post(
+        "https://api.brevo.com/v3/smtp/email",
+        headers={
+            "accept": "application/json",
+            "api-key": BREVO_API_KEY,
+            "content-type": "application/json",
+        },
+        json={
+            "sender": {"name": "Ricardo — NEXO Análise", "email": SENDER_EMAIL},
+            "to": [{"email": email_cliente, "name": nome_cliente}],
+            "subject": "✅ Sua assinatura do NEXO Análise foi renovada",
+            "textContent": corpo,
+        },
+        timeout=15,
+    )
+    resposta.raise_for_status()
 
 def enviar_email(email_cliente, nome_cliente, chave, plano_nome, expiracao):
     expiracao_texto = "Vitalícia" if expiracao == "definitivo" else f"Válida até {expiracao}"
@@ -2038,7 +2148,20 @@ def webhook():
         plano_info = PLANOS.get(valor)
         if not plano_info:
             plano_info = ("mensal", 1, "months")
-        plano_nome = plano_info[0]
+        plano_nome, quantidade, unidade = plano_info
+
+        # RENOVAÇÃO ANTES DE EMISSÃO: quem já tem chave viva não ganha chave nova —
+        # a validade DELE é que anda. Vale para qualquer cobrança recorrente, e não
+        # depende de o valor da renovação chegar 7 ou 47: os dois dão um mês.
+        if unidade != "forever":
+            ws = conectar_sheets()
+            indice, linha = achar_linha_renovavel(ws.get_all_values(), email_cliente)
+            if indice:
+                validade_nova = validade_renovada(linha[2], quantidade)
+                renovar_validade(ws, indice, validade_nova)
+                print(f"RENOVACAO: {linha[0]} -> {validade_nova} ({email_cliente})")
+                enviar_email_renovacao(email_cliente, nome_cliente, linha[0], validade_nova)
+                return jsonify({"status": "ok", "renovada": linha[0], "validade": validade_nova}), 200
 
         chave      = gerar_chave()
         expiracao  = calcular_expiracao(valor)
