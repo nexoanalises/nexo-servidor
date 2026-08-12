@@ -24,7 +24,7 @@ class Conclusao:
     """
 
     def __init__(self, cid, par, elo, estado, fatos, valor_derivado=None,
-                 qualificacoes=(), urgencia="nao_apurada"):
+                 qualificacoes=(), urgencia="nao_apurada", toca=()):
         self.id = cid
         self.par = par
         self.elo = elo
@@ -33,6 +33,10 @@ class Conclusao:
         self.valor_derivado = valor_derivado                  # o único número NOVO que pode aparecer
         self.qualificacoes = tuple(qualificacoes)             # texto que a redação é OBRIGADA a preservar
         self.urgencia = urgencia
+        # Tópicos de decisão que esta conclusão coloca em avaliação. É o canal pelo
+        # qual a evidência — e não a preocupação declarada — decide se um limite
+        # estrutural precisa ser dito ao lojista.
+        self.toca = tuple(toca)
         self.forca_conclusao = ELOS[elo]["forca_conclusao"]
         self.verbos = ELOS[elo]["verbos"]
         self.operadores = OPERADORES[self.forca_conclusao]
@@ -137,14 +141,19 @@ def _derivar(decl, evidencias):
 def avaliar(ambiente, evidencias, abstencoes=(), preocupacao=None):
     """ETAPAS 1–8. Devolve (conclusoes, limites, silencios).
 
-    `conclusoes` atravessam a fronteira para a linguagem — serão redigidas e
-    fiscalizadas. `limites` já SÃO texto declarado e vão direto para a composição,
-    e cada um decide sozinho se ocupa o relatório: `preocupacao` é o que o lojista
-    declarou estar querendo decidir, e é o único critério de publicação.
+    Roda em DUAS PASSADAS, e a ordem é o que dá voz à evidência: primeiro o Motor
+    apura o que consegue apurar; só então cada limite estrutural descobre se está
+    bloqueando alguma decisão que a análise de fato colocou em avaliação.
+
+    Uma passada só faria o limite decidir antes de saber o que a análise achou — e o
+    único critério disponível seria a `preocupacao` declarada, que é lente, não
+    veredito.
     """
     conclusoes, limites, silencios = [], [], []
     campos_abstidos = {a.campo for a in abstencoes}
+    pendentes = []
 
+    # ── PASSADA 1 · o que o Motor consegue apurar ────────────────────────────
     for i, decl in enumerate(PARES.get(ambiente, []), start=1):
         cid = "C%02d" % (i * 7)          # id estável e legível no relatório de falhas
         a, b = decl["par"]
@@ -152,21 +161,7 @@ def avaliar(ambiente, evidencias, abstencoes=(), preocupacao=None):
         # ETAPA 4 · ordem corrigida na v0.2: estrutural ANTES de circunstancial.
         estruturais = [c for c in (a, b) if c in INEXISTENTES_NO_PRODUTO]
         if estruturais:
-            declarado = LIMITES_DECLARADOS.get(decl["par"])
-            if declarado:
-                relevante = preocupacao in declarado["relevante_para"]
-                limites.append(Limite(
-                    cid, decl["par"], declarado["texto"], publicar=relevante,
-                    motivo_publicacao=("impede a decisão declarada (%s)" % preocupacao
-                                       if relevante else
-                                       "registrado: não bloqueia a decisão desta análise"),
-                ))
-            else:
-                # Sem frase declarada, o produto NÃO improvisa a declaração do próprio
-                # limite: cala. Declarar um limite com texto inventado seria a mesma
-                # invenção que o resto da arquitetura impede, só que mais educada.
-                silencios.append(Silencio(decl["par"], "C_limite_sem_frase_declarada",
-                                          INEXISTENTES_NO_PRODUTO[estruturais[0]]))
+            pendentes.append((cid, decl, estruturais[0]))
             continue
 
         faltando = [c for c in (a, b) if c not in evidencias]
@@ -195,6 +190,40 @@ def avaliar(ambiente, evidencias, abstencoes=(), preocupacao=None):
             valor_derivado=_derivar(decl, evidencias),
             qualificacoes=qualificacoes,
             urgencia=_urgencia(decl, evidencias),
+            toca=decl.get("toca", ()),
         ))
+
+    # ── PASSADA 2 · os limites, agora que se sabe o que está em avaliação ────
+    #
+    # 🔑 O cliente pode dizer "estoque". A evidência pode dizer "margem". Um tópico
+    # entra em avaliação quando uma RELAÇÃO SE FORMOU tocando nele — não quando o
+    # lojista o marcou no formulário.
+    em_avaliacao = set()
+    for c in conclusoes:
+        em_avaliacao |= set(c.toca)
+
+    for cid, decl, campo_ausente in pendentes:
+        declarado = LIMITES_DECLARADOS.get(decl["par"])
+        if not declarado:
+            # Sem frase declarada, o produto NÃO improvisa a declaração do próprio
+            # limite: cala. Declarar um limite com texto inventado seria a mesma
+            # invenção que o resto da arquitetura impede, só que mais educada.
+            silencios.append(Silencio(decl["par"], "C_limite_sem_frase_declarada",
+                                      INEXISTENTES_NO_PRODUTO[campo_ausente]))
+            continue
+
+        bloqueados = set(declarado.get("bloqueia", ())) & em_avaliacao
+        pedido = preocupacao in declarado.get("relevante_para", ())
+
+        if bloqueados:
+            motivo = ("bloqueia decisão em avaliação: %s" % ", ".join(sorted(bloqueados)))
+        elif pedido:
+            motivo = "relevância editorial: o lojista declarou %s" % preocupacao
+        else:
+            motivo = "registrado: não bloqueia decisão desta análise"
+
+        limites.append(Limite(cid, decl["par"], declarado["texto"],
+                              publicar=bool(bloqueados or pedido),
+                              motivo_publicacao=motivo))
 
     return conclusoes, limites, silencios

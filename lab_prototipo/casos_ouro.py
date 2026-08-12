@@ -95,14 +95,17 @@ CASOS = [
         # vocabulário mensurável em vez de opinativa.
         "abstinencia_legitima": True,
     },
-    # ── O MESMO LIMITE, DUAS ANÁLISES — e o que muda é a PERGUNTA do lojista ──
+    # ── O MESMO LIMITE, TRÊS ANÁLISES — e quem decide é a EVIDÊNCIA ──────────
     #
     # ⚖️ estado epistemológico interno ≠ obrigação de publicação em toda análise.
-    # O par continua 🔵 não determinável nas duas; o que decide a publicação é ele
-    # estar ou não impedindo a decisão que importa HOJE.
+    # O par continua 🔵 não determinável nas três; o que muda é se ele está bloqueando
+    # uma decisão que a análise de fato colocou em avaliação.
+    #
+    # 🔴 E a preocupação declarada é LENTE, NÃO VEREDITO: ela pode aumentar a
+    # relevância editorial, nunca pode suprimir o que a evidência tornou relevante.
     {
-        "nome": "celular · limite RELEVANTE — a pergunta é sobre margem",
-        "prova": "o limite impede a decisão declarada → publica, e isso é entrega",
+        "nome": "celular · limite bloqueia decisão EM AVALIAÇÃO",
+        "prova": "a relação formada tocou margem → o limite impede a decisão → publica",
         "ambiente": "celular",
         "preocupacao": "margem",
         "dados": {"falta_declarada": "faltou capa de silicone", "margem_acessorios": "45"},
@@ -114,19 +117,34 @@ CASOS = [
         "espera_saida": True,
     },
     {
-        "nome": "celular · MESMO limite, pergunta sobre estoque",
-        "prova": "não bloqueia a decisão desta análise → registra, não ocupa o relatório",
+        "nome": "celular · o lojista disse ESTOQUE, a evidência disse MARGEM",
+        "prova": "a preocupação não suprime: o limite sai porque a evidência o tornou relevante",
         "ambiente": "celular",
         "preocupacao": "estoque",
         "dados": {"falta_declarada": "faltou capa de silicone", "margem_acessorios": "45"},
-        "deve_conter": [r"45", r"pertence a|categoria"],
+        # ⚡ O caso que a correção do fundador criou. Com a preocupação como único
+        # portão, esta linha estaria ausente — e o produto teria calado uma ausência
+        # estrutural que impedia justamente a decisão que os dados levantaram.
+        "deve_conter": [r"45", r"pertence a|categoria", r"não foi possível avaliar"],
+        "jamais": [
+            (r"causou|por causa|resultou em|levou a", "conclusao_sem_origem"),
+        ],
+        "espera_saida": True,
+    },
+    {
+        "nome": "celular · nada em avaliação → o limite não ocupa o relatório",
+        "prova": "sem relação formada, nenhum tópico está na mesa: registra e cala",
+        "ambiente": "celular",
+        "preocupacao": "estoque",
+        "dados": {"falta_declarada": "faltou capinha", "margem_acessorios": "45"},
+        "deve_conter": [],
         "jamais": [
             # Repetido todo mês sem nada ter mudado, deixaria de ser transparência e
             # viraria refrão institucional.
             (r"não foi possível avaliar", "ruido_institucional"),
             (r"não possui margem apurada", "ruido_institucional"),
         ],
-        "espera_saida": True,
+        "espera_saida": False,
     },
     {
         "nome": "varejo · par NÃO DECLARADO no catálogo",

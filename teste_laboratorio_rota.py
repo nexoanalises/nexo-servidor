@@ -83,11 +83,15 @@ r = cliente.post("/laboratorio", json={})
 checa("sem LAB_TOKEN → 404, como se não existisse", r.status_code == 404, r.status_code)
 
 servidor.LAB_TOKEN = "segredo-de-teste"
-print("\n② O PORTEIRO")
+print("\n② O PORTEIRO — E A PORTA ERRADA É INDISTINGUÍVEL DE UMA PAREDE")
+# Um 401 confirmaria a quem errou que a rota EXISTE, e a diferença entre 404 e 401 é
+# exatamente o que um varredor procura. As três negativas dão 404.
 r = cliente.post("/laboratorio", json={})
-checa("com LAB_TOKEN e sem cabeçalho → 401", r.status_code == 401, r.status_code)
+checa("com LAB_TOKEN e sem cabeçalho → 404, não 401", r.status_code == 404, r.status_code)
 r = cliente.post("/laboratorio", json={}, headers={"X-Lab-Token": "errado"})
-checa("token errado → 401", r.status_code == 401, r.status_code)
+checa("token errado → 404, a rota continua oculta", r.status_code == 404, r.status_code)
+r = cliente.post("/laboratorio", json={}, headers={"X-Lab-Token": "segredo-de-test"})
+checa("token quase certo → 404 também", r.status_code == 404, r.status_code)
 r = cliente.post("/laboratorio", json={}, headers={"X-Lab-Token": "segredo-de-teste"})
 checa("token certo e sem chave de IA → 503", r.status_code == 503, r.status_code)
 

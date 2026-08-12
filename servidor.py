@@ -8,6 +8,7 @@ from datetime import datetime, timedelta
 from dateutil.relativedelta import relativedelta
 import os
 import sys
+import hmac
 import json
 import unicodedata
 import requests
@@ -2479,10 +2480,13 @@ def laboratorio():
 
     Custo: 7 unidades × ~1 frase curta ≈ metade de UMA análise de cliente.
     """
-    if not LAB_TOKEN:
+    # 🔴 As duas negativas respondem 404, e isso é correção da condição ② do fundador:
+    # *"token errado → continua oculta"*. Um 401 confirmaria a QUEM ERROU que a rota
+    # existe — e a diferença entre 404 e 401 é justamente o que um varredor procura.
+    # Aqui as duas portas fechadas são indistinguíveis de uma parede.
+    if not LAB_TOKEN or not hmac.compare_digest(
+            request.headers.get("X-Lab-Token", ""), LAB_TOKEN):
         return jsonify({"status": "erro", "motivo": "rota inativa"}), 404
-    if request.headers.get("X-Lab-Token", "") != LAB_TOKEN:
-        return jsonify({"status": "erro", "motivo": "Acesso não autorizado."}), 401
     if groq_client is None:
         return jsonify({"status": "erro", "motivo": "Servidor sem chave de IA configurada."}), 503
 

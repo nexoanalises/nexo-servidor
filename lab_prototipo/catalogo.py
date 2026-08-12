@@ -109,6 +109,11 @@ ELOS = {
 # ─────────────────────────────────────────────────────────────────────────────
 # PARES DECLARADOS POR AMBIENTE — o mecanismo avalia SÓ estes.
 #
+# `toca` são os TÓPICOS DE DECISÃO que o par coloca em avaliação quando a relação se
+# forma. É por aqui que a evidência ganha voz sobre a publicação de um limite: se a
+# análise formou uma relação que toca `margem`, a decisão de margem está na mesa —
+# tenha o lojista marcado "margem" ou não.
+#
 # `capacidade ↔ perdas_validade` não aparece aqui, e é de propósito: estão no mesmo
 # formulário, no mesmo período, e não têm relação nenhuma. O par não é reprovado
 # depois — ele NÃO EXISTE (v0.1 §0).
@@ -119,18 +124,23 @@ PARES = {
         {"par": ("descontos_valor", "lucro"),
          "elo": "mesma_unidade_periodo",
          "classe": "custo_sobre_resultado",
-         "operacao": "proporcao"},
+         "operacao": "proporcao",
+         "toca": {"rentabilidade"}},
 
         {"par": ("confiabilidade_fornecedor", "falta_declarada"),
          "elo": "coocorrencia_plausivel",
          "classe": "cadeia_fornecimento",
-         "operacao": "coocorrencia"},
+         "operacao": "coocorrencia",
+         "toca": {"fornecimento"}},
     ],
     "celular": [
         {"par": ("falta_declarada", "margem_acessorios"),
          "elo": "nomeia_classifica",
          "classe": "ruptura_por_categoria",
          "operacao": "pertencimento",
+         # A ruptura por categoria fala de margem: quando ela se forma, a decisão de
+         # margem entra em avaliação — e é isso que dá voz à evidência.
+         "toca": {"margem", "ruptura"},
          # 🆕 v0.2 etapa 3: o elo precisa ser DECLARADO **e** SATISFEITO. Aqui só se
          # satisfaz se a etapa 0 tiver produzido o vínculo item ∈ categoria.
          "exige_vinculo": ("falta_declarada", "acessorio")},
@@ -138,7 +148,8 @@ PARES = {
         {"par": ("margem_venda_aparelho", "margem_assistencia"),
          "elo": "mesma_grandeza_angulos",
          "classe": "margem_por_operacao",
-         "operacao": "comparacao_ritmo"},
+         "operacao": "comparacao_ritmo",
+         "toca": {"margem"}},
     ],
 }
 
@@ -176,15 +187,31 @@ PARES = {
 # ⚠️ E a regra NÃO é "mostrar uma vez e nunca mais": é relevância, não contagem. Se a
 # mesma pergunta voltar em outro mês, o limite volta com ela.
 #
-# `relevante_para` é DECLARADO — casa com a preocupação que o lojista marca no app
-# (#088). Nada aqui é inferido do texto: relevância adivinhada seria a mesma invenção
-# que o resto da arquitetura impede, só que na camada de edição.
+# 🔴 O PORTÃO NÃO É A `preocupacao`, E ISSO FOI CORREÇÃO DO FUNDADOR:
+#
+#     A preocupação declarada é LENTE, não VEREDITO.
+#
+# Se o lojista marca `estoque` e a evidência ativa uma decisão de margem, um limite que
+# bloqueia justamente essa decisão PRECISA poder aparecer. Senão a preocupação passaria
+# a SUPRIMIR uma conclusão que a evidência tornou relevante — e o produto ficaria refém
+# do que o lojista achava que era o problema dele.
+#
+#     ### O cliente pode dizer "estoque". A evidência pode dizer "margem".
+#
+# `bloqueia` .......... tópicos de decisão que este limite impede. Portão PRINCIPAL:
+#                       publica quando um deles está EM AVALIAÇÃO no Motor.
+# `relevante_para` .... a preocupação declarada AUMENTA a relevância editorial —
+#                       nunca é o único portão, e nunca fecha o outro.
+#
+# Nada aqui é inferido do texto: relevância adivinhada seria a mesma invenção que o
+# resto da arquitetura impede, só que na camada de edição.
 
 LIMITES_DECLARADOS = {
     ("margem_venda_aparelho", "margem_assistencia"): {
         "texto": "Não foi possível avaliar a margem entre venda de aparelhos e "
                  "assistência porque o produto não possui margem apurada para essas "
                  "duas operações.",
+        "bloqueia": {"margem"},
         "relevante_para": {"margem", "rentabilidade", "onde_investir"},
     },
 }
