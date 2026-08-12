@@ -157,6 +157,11 @@ def _prova_vocabulario(campo, valor):
             if canonizar(termo) in c:
                 vinculos["item"] = termo
                 vinculos["categoria"] = PERTENCIMENTO[termo]
+                # 🔑 O trecho ATÔMICO da entidade, como o lojista escreveu. É o que
+                # autoriza a redação a dizer "capa de silicone" — e é só isso: o
+                # campo bruto inteiro NUNCA entra como licença de redação, senão a
+                # proveniência viraria túnel para reintroduzir lógica não autorizada.
+                vinculos["trecho_item"] = _trecho_original(valor, termo)
                 break
 
     if not vinculos:

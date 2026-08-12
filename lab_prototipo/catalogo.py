@@ -248,6 +248,49 @@ OPERADORES = {
 # Abster para o lado seguro é o mesmo movimento do Fiscal 0.
 # ─────────────────────────────────────────────────────────────────────────────
 
+# Rótulo PUBLICÁVEL — como o campo se chama para o lojista.
+#
+# 🔧 A rodada real mostrou que eu entregava ao redator a representação INTERNA do
+# Motor: `descontos_valor = 6200.0`. O modelo devolveu "o descontos_valor de 6200.0" —
+# e eu o reprovava por devolver justamente o que eu tinha mandado.
+#
+#     O redator recebe a representação PUBLICÁVEL da unidade.
+#     O Motor segue com IDs e nomes canônicos por baixo.
+ROTULO_PUBLICO = {
+    "descontos_valor":           "Descontos concedidos",
+    "lucro":                     "Lucro",
+    "acoes_quais":               "Ações declaradas",
+    "confiabilidade_fornecedor": "Confiabilidade dos fornecedores",
+    "falta_declarada":           "Falta declarada",
+    "margem_acessorios":         "Margem de acessórios",
+    "capacidade":                "Capacidade",
+    "perdas_validade":           "Perdas por validade",
+    "margem_venda_aparelho":     "Margem na venda de aparelhos",
+    "margem_assistencia":        "Margem na assistência",
+}
+
+
+def formatar(valor, campo=None):
+    """Formata número no padrão brasileiro, com a unidade do campo quando houver.
+
+    🔧 O float americano `6200.0` chegava cru ao redator. Aqui ele vira `R$ 6.200`.
+    """
+    if not isinstance(valor, (int, float)):
+        return str(valor)
+    if isinstance(valor, float) and valor.is_integer():
+        valor = int(valor)
+    if isinstance(valor, int):
+        n = "{:,}".format(valor).replace(",", ".")
+    else:
+        n = "{:,.1f}".format(valor).replace(",", "X").replace(".", ",").replace("X", ".")
+    unidade = NATUREZA.get(campo, {}).get("unidade")
+    if unidade == "BRL":
+        return "R$ %s" % n
+    if unidade == "pct":
+        return "%s%%" % n
+    return n
+
+
 # Rótulos humanos dos campos. É vocabulário DECLARADO: a redação só pode nomear a
 # evidência com o rótulo que o catálogo dá a ela.
 ROTULOS = {

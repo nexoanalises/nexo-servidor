@@ -24,6 +24,7 @@
 # "frase fiel barrada", e é sobre elas, e só sobre elas, que a calibragem se decide.
 
 from casos_ouro import CASOS
+from catalogo import ROTULO_PUBLICO, formatar
 from entrada import normalizar_formulario
 from motor import avaliar
 from saida import fiscal_10
@@ -45,33 +46,56 @@ def prompt_da_unidade(unidade):
     não recebe material para raciocinar porque não é dele que se quer raciocínio: a
     lógica já foi produzida pelo Motor, e a única tarefa é dizê-la em português.
     """
-    a, b = unidade.par
-    fatos = "\n".join("  - %s = %s" % (campo, valor)
-                      for campo, valor in unidade.fatos.items())
-    derivado = ("  - valor derivado = %s\n" % unidade.valor_derivado
-                if unidade.valor_derivado is not None else "")
-    qualif = ("\nQUALIFICAÇÕES QUE A FRASE É OBRIGADA A PRESERVAR:\n"
+    fatos = "\n".join("  %s: %s" % (rotulo, valor)
+                      for rotulo, valor in unidade.publicavel())
+    qualif = ("\nQUALIFICAÇÕES QUE A FRASE É OBRIGADA A PRESERVAR, na íntegra:\n"
               + "\n".join("  - %s" % q for q in unidade.qualificacoes)
               if unidade.qualificacoes else "")
 
     return (
         "Escreva UMA frase em português do Brasil, para o dono de uma loja.\n"
         "\n"
-        "FATOS QUE VOCÊ PODE CITAR (nenhum outro número existe):\n"
-        "%s\n%s"
+        "FATOS (nenhum outro número existe):\n"
+        "%s\n"
         "\n"
-        "RELAÇÃO AUTORIZADA ENTRE ELES: %s\n"
+        "RELAÇÃO PERMITIDA:\n"
+        "  %s\n"
+        "\n"
         "VERBOS PERMITIDOS (use exatamente um deles): %s\n"
         "%s\n"
         "\n"
         "REGRAS:\n"
         "- não acrescente nenhum número que não esteja acima;\n"
         "- não afirme causa, consequência, culpa ou previsão;\n"
+        "- não qualifique intensidade, gravidade ou importância;\n"
         "- não dê conselho, recomendação ou próximo passo;\n"
         "- não escreva nada além desta única frase."
-        % (fatos, derivado, unidade.forca_conclusao,
-           " · ".join(unidade.verbos), qualif)
+        % (fatos, _relacao_publicavel(unidade), " · ".join(unidade.verbos), qualif)
     )
+
+
+def _relacao_publicavel(unidade):
+    """A relação autorizada dita em português — não em nome interno de operação.
+
+    🔧 O prompt antigo mandava `RELAÇÃO AUTORIZADA ENTRE ELES: proporcao`, e o modelo
+    devolvia "uma proporção", que o fiscal barrava como excesso. Punir o redator por
+    devolver o vocabulário que EU entreguei é defeito meu, não dele.
+    """
+    a, b = unidade.par
+    ra, rb = ROTULO_PUBLICO.get(a, a).lower(), ROTULO_PUBLICO.get(b, b).lower()
+    fa = unidade.semantica.get(a, {}).get("publicavel", "")
+    fb = unidade.semantica.get(b, {}).get("publicavel", "")
+
+    if unidade.forca_conclusao == "proporcao":
+        return ("%s equivalem a %s do %s"
+                % (ra, formatar(unidade.valor_derivado).replace(",0", "") + "%", rb))
+    if unidade.forca_conclusao == "coocorrencia":
+        return "%s (%s) e %s aconteceram no mesmo período" % (ra, fa, fb)
+    if unidade.forca_conclusao == "pertencimento":
+        return "%s pertence a uma categoria cuja %s é %s" % (fa, rb, fb)
+    if unidade.forca_conclusao == "comparacao_ritmo":
+        return "%s e %s podem ser comparados em ritmo" % (ra, rb)
+    return "%s e %s" % (ra, rb)
 
 
 def _classificar(veredito):
@@ -131,6 +155,7 @@ def rodar_laboratorio(chamar, casos=None, exigir_cobertura=True):
                 "forca_conclusao": unidade.forca_conclusao,
                 "verbos_autorizados": list(unidade.verbos),
                 "numeros_permitidos": unidade.numeros_permitidos(),
+                "termos_permitidos": sorted(unidade.termos_permitidos()),
                 "qualificacoes": list(unidade.qualificacoes),
                 "prompt": prompt,
                 "redacao": texto,

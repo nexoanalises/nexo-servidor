@@ -32,15 +32,31 @@ def _canon(t):
 
 
 def _numeros(texto):
-    """Todo número citado na redação, normalizado para float."""
+    """Todo número citado na redação, normalizado para float.
+
+    🔧 BUG QUE A RODADA REAL EXPÔS, e ele cegou o fiscal inteiro: o padrão antigo
+    lia `8000.0` como **8000 e 0**, e `77.5` como **77 e 5** — depois acusava o
+    modelo de citar números que não existiam. Seis das sete reprovas da primeira
+    rodada eram este defeito, não comportamento do modelo.
+
+    A desambiguação do ponto é por FORMA, não por chute:
+        1.234  → milhar  (exatamente 3 dígitos depois do ponto)
+        77.5   → decimal (1 ou 2 dígitos)
+        6.200,50 → vírgula manda: pontos viram milhar
+    """
     achados = []
-    for m in re.finditer(r"\d+(?:\.\d{3})*(?:,\d+)?|\d+(?:\.\d+)?", texto):
-        bruto = m.group(0)
+    for m in re.finditer(r"\d[\d.]*(?:,\d+)?", texto):
+        bruto = m.group(0).rstrip(".")
         if "," in bruto:
             bruto = bruto.replace(".", "").replace(",", ".")
-        elif re.match(r"^\d{1,3}(\.\d{3})+$", m.group(0)):
+        elif re.match(r"^\d{1,3}(?:\.\d{3})+$", bruto):
             bruto = bruto.replace(".", "")
-        achados.append(float(bruto))
+        elif not re.match(r"^\d+(?:\.\d{1,2})?$", bruto):
+            bruto = bruto.replace(".", "")
+        try:
+            achados.append(float(bruto))
+        except ValueError:
+            continue
     return achados
 
 
@@ -157,6 +173,10 @@ def fiscal_10(unidade, texto, exigir_cobertura=True):
         for campo in unidade.par:
             conhecidas |= {_canon(r) for r in ROTULOS.get(campo, ())}
         conhecidas |= MARCADORES_PROVENIENCIA
+        # 🔧 O valor semântico normalizado e o trecho atômico da proveniência. Sem
+        # isto o fiscal punia "capa de silicone" — que está na origem do fato.
+        # ⛔ O campo bruto inteiro continua FORA: proveniência não é licença.
+        conhecidas |= {_canon(t) for t in getattr(unidade, "termos_permitidos", set)()}
         for expr in autorizados:
             conhecidas |= set(expr.split())
         for q in unidade.qualificacoes:

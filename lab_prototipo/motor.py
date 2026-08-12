@@ -13,6 +13,7 @@
 
 from catalogo import (
     ELOS, INEXISTENTES_NO_PRODUTO, LIMITES_DECLARADOS, OPERADORES, PARES,
+    ROTULO_PUBLICO, formatar,
 )
 
 
@@ -24,7 +25,7 @@ class Conclusao:
     """
 
     def __init__(self, cid, par, elo, estado, fatos, valor_derivado=None,
-                 qualificacoes=(), urgencia="nao_apurada", toca=()):
+                 qualificacoes=(), urgencia="nao_apurada", toca=(), semantica=None):
         self.id = cid
         self.par = par
         self.elo = elo
@@ -37,9 +38,38 @@ class Conclusao:
         # qual a evidência — e não a preocupação declarada — decide se um limite
         # estrutural precisa ser dito ao lojista.
         self.toca = tuple(toca)
+        # 🔑 A ficha semântica de cada fato, congelada pelo veredito:
+        #   valor normalizado ... diz O QUE o fato É        → protege o significado
+        #   trecho atômico ...... diz COMO ele apareceu     → protege a voz do lojista
+        # O texto bruto completo NÃO entra: ele viraria licença de redação.
+        self.semantica = semantica or {}
         self.forca_conclusao = ELOS[elo]["forca_conclusao"]
         self.verbos = ELOS[elo]["verbos"]
         self.operadores = OPERADORES[self.forca_conclusao]
+
+    def termos_permitidos(self):
+        """Os termos textuais que a redação pode usar, e só eles.
+
+        🔧 Existia `numeros_permitidos()` e nada equivalente para fato TEXTUAL — então
+        o modelo era punido por escrever "capa de silicone", que está na origem. Aqui
+        entram o valor semântico normalizado e o trecho atômico da proveniência.
+        """
+        termos = set()
+        for ficha in self.semantica.values():
+            for t in ficha.get("termos", ()):
+                if not t:
+                    continue
+                termos.add(t)
+                termos.update(t.split())
+        return termos
+
+    def publicavel(self):
+        """A unidade como ela pode ser mostrada — rótulo humano e número brasileiro."""
+        linhas = []
+        for campo in self.par:
+            ficha = self.semantica.get(campo, {})
+            linhas.append((ROTULO_PUBLICO.get(campo, campo), ficha.get("publicavel", "")))
+        return linhas
 
     def numeros_permitidos(self):
         """Os únicos números que podem aparecer na redação desta unidade."""
@@ -88,6 +118,32 @@ class Silencio:
 
     def __repr__(self):
         return "<silencio %s (%s)>" % (self.par, self.caso)
+
+
+def _ficha(ev):
+    """Monta a ficha semântica de UMA evidência para atravessar a fronteira.
+
+    Numérica: valor formatado, sem termos. Textual: o que a etapa 0 NORMALIZOU
+    (fato, item, categoria) e os TRECHOS ATÔMICOS que sustentam cada um — nunca o
+    campo bruto inteiro.
+    """
+    if ev.tipo != "texto_livre":
+        return {"publicavel": formatar(ev.valor, ev.campo), "termos": ()}
+
+    v = ev.vinculos
+    termos, partes = [], []
+    if v.get("item"):
+        termos += [v["item"], v.get("trecho_item")]
+        partes.append(v["item"])
+    if v.get("categoria"):
+        termos.append(v["categoria"])
+    if v.get("freio"):
+        termos.append(v["freio"].get("trecho"))
+    if v.get("fato") == "falta":
+        publicavel = ("falta de %s" % partes[0]) if partes else "falta declarada"
+    else:
+        publicavel = v.get("freio", {}).get("qualificacao", "declaração do lojista")
+    return {"publicavel": publicavel, "termos": tuple(t for t in termos if t)}
 
 
 def _freios(evidencias):
@@ -191,6 +247,7 @@ def avaliar(ambiente, evidencias, abstencoes=(), preocupacao=None):
             qualificacoes=qualificacoes,
             urgencia=_urgencia(decl, evidencias),
             toca=decl.get("toca", ()),
+            semantica={c: _ficha(evidencias[c]) for c in (a, b)},
         ))
 
     # ── PASSADA 2 · os limites, agora que se sabe o que está em avaliação ────
