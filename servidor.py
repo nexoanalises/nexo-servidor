@@ -7,6 +7,7 @@ import string
 from datetime import datetime, timedelta
 from dateutil.relativedelta import relativedelta
 import os
+import sys
 import json
 import unicodedata
 import requests
@@ -52,6 +53,11 @@ groq_client = Groq(api_key=GROQ_API_KEY) if GROQ_API_KEY else None
 
 # Segredo compartilhado entre o app e o servidor (opcional, dificulta abuso da rota /analisar)
 APP_TOKEN = os.environ.get("APP_TOKEN", "")
+
+# Segredo da rota /laboratorio. Sem esta variável a rota responde 404 e o laboratório
+# é como se não existisse — nasce DESLIGADO de propósito: ele gasta a mesma cota
+# diária que o cliente pagante usa, e ninguém deve poder ligá-lo sem querer.
+LAB_TOKEN = os.environ.get("LAB_TOKEN", "")
 
 # Modelo da análise. O app nunca manda este campo — existe para comparar modelos
 # com os MESMOS dados antes de trocar o padrão, em vez de decidir por benchmark
@@ -2452,6 +2458,66 @@ def optin():
         resp = jsonify({"status": "erro", "motivo": "falha no cadastro"})
         resp.status_code = 502
         return _optin_cors(resp)
+
+@app.route("/laboratorio", methods=["POST"])
+def laboratorio():
+    """🧪 ROTA DE LABORATÓRIO — o protótipo do mecanismo (#094) contra o modelo REAL.
+
+    Existe por um motivo só: a chave da Groq vive aqui e em nenhum outro lugar (#043),
+    então este é o único lugar onde a arquitetura pode encontrar linguagem livre. Até
+    agora ela só provou barrar os erros que nós conseguimos NOMEAR.
+
+    ⛔ NÃO toca o produto: não gera PDF, não grava histórico, não escreve na planilha,
+    não altera o app e não passa perto da /analisar. Entra requisição, sai REGISTRO.
+
+    🔒 TRÊS TRAVAS, e a primeira é a que importa:
+      ① INERTE sem LAB_TOKEN nas Variables — enquanto o fundador não criar a variável,
+        esta rota responde 404 e é como se não existisse;
+      ② os casos vêm do ARQUIVO, nunca do corpo da requisição: ninguém injeta prompt
+        aqui, o pior que um portador do token faz é queimar cota;
+      ③ o modelo sai da mesma allowlist da /analisar.
+
+    Custo: 7 unidades × ~1 frase curta ≈ metade de UMA análise de cliente.
+    """
+    if not LAB_TOKEN:
+        return jsonify({"status": "erro", "motivo": "rota inativa"}), 404
+    if request.headers.get("X-Lab-Token", "") != LAB_TOKEN:
+        return jsonify({"status": "erro", "motivo": "Acesso não autorizado."}), 401
+    if groq_client is None:
+        return jsonify({"status": "erro", "motivo": "Servidor sem chave de IA configurada."}), 503
+
+    try:
+        sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                        "lab_prototipo"))
+        from laboratorio import imprimir, rodar_laboratorio
+    except Exception as e:                                   # noqa: BLE001
+        return jsonify({"status": "erro",
+                        "motivo": "protótipo indisponível: %s" % e}), 500
+
+    corpo = request.get_json(silent=True) or {}
+    modelo = corpo.get("modelo")
+    modelo = modelo if modelo in MODELOS_PERMITIDOS else MODELO_PADRAO
+
+    def chamar(prompt):
+        r = groq_client.chat.completions.create(
+            model=modelo,
+            messages=[{"role": "user", "content": prompt}],
+            temperature=corpo.get("temperatura", 0.3),
+        )
+        return r.choices[0].message.content
+
+    registro = rodar_laboratorio(chamar)
+    registro["modelo"] = modelo
+    registro["build"] = (os.environ.get("RAILWAY_GIT_COMMIT_SHA") or "desconhecido")[:7]
+
+    # O registro inteiro vai para o log do Railway também: se a resposta se perder no
+    # caminho, a rodada não se perde junto — e cota gasta não se repõe.
+    print(imprimir(registro), flush=True)
+
+    if corpo.get("formato") == "texto":
+        return imprimir(registro), 200, {"Content-Type": "text/plain; charset=utf-8"}
+    return jsonify(registro), 200
+
 
 @app.route("/", methods=["GET"])
 def home():
