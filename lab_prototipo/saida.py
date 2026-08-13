@@ -22,7 +22,7 @@ import unicodedata
 
 from catalogo import (
     LEXICO_LOGICO, MARCADORES_PROVENIENCIA, PALAVRAS_FUNCIONAIS, ROTULOS,
-    ROTULO_PUBLICO, formas_aceitas,
+    ROTULO_PUBLICO, LEXICO_SEMANTICO, MARCADORES_ATRIBUICAO, formas_aceitas,
 )
 from motor import Conclusao
 
@@ -126,9 +126,17 @@ def redator_adversario(unidade):
 # FISCAL 10 — compara redação × origem. Nunca decompõe.
 # ─────────────────────────────────────────────────────────────────────────────
 
+def _nucleos_de(unidade):
+    """Unidade sem núcleo declarado cai na frase inteira — comportamento antigo."""
+    return [{"evento": q, "trecho": None, "frase": q}
+            for q in getattr(unidade, "qualificacoes", ())]
+
+
 class Veredito:
     def __init__(self, unidade, texto):
         self.unidade, self.texto, self.falhas = unidade, texto, []
+        # Novidade lexical sem classe semântica: MEDIDA, não reprovada.
+        self.termos_novos = []
 
     @property
     def aprovado(self):
@@ -162,45 +170,65 @@ def fiscal_10(unidade, texto, exigir_cobertura=True):
     if isinstance(unidade, Conclusao) and not any(a in c for a in autorizados):
         v.reprovar("verbo", "nenhum verbo autorizado de %s aparece na redação" % unidade.id)
 
-    # ③ QUALIFICAÇÃO — o freio foi preservado?
-    for q in unidade.qualificacoes:
-        if _canon(q) not in c:
-            v.reprovar("qualificacao", "qualificação obrigatória ausente: %r" % q)
-
-    # ④ EXCESSO — a frase afirma algo além da origem?
+    # ③ QUALIFICAÇÃO — preservada no CONTEÚDO, não na forma.
     #
-    # Aqui o fiscal se abstém para o lado seguro, exatamente como o Fiscal 0: palavra
-    # que ele não sabe atribuir a nada declarado é palavra que pode estar carregando
-    # significado que ninguém apurou. É a checagem mais severa do protótipo, e é a que
-    # tem mais chance de revelar, RODANDO, se ela é severa demais.
-    if exigir_cobertura:
-        conhecidas = set(PALAVRAS_FUNCIONAIS)
-        for campo in unidade.par:
-            conhecidas |= {_canon(r) for r in ROTULOS.get(campo, ())}
-            # 🔧 Defeito 5: o rótulo PUBLICÁVEL é vocabulário declarado do catálogo,
-            # tanto quanto ROTULOS. Sem isto o fiscal barrava "concedidos" — palavra
-            # que sai de `ROTULO_PUBLICO["descontos_valor"] = "Descontos concedidos"`.
-            # Eu entregava o rótulo ao redator e depois o punia por usá-lo.
-            conhecidas |= {_canon(p) for p in ROTULO_PUBLICO.get(campo, "").split()}
-        conhecidas |= MARCADORES_PROVENIENCIA
-        # 🔧 O valor semântico normalizado e o trecho atômico da proveniência. Sem
-        # isto o fiscal punia "capa de silicone" — que está na origem do fato.
-        # ⛔ O campo bruto inteiro continua FORA: proveniência não é licença.
-        conhecidas |= {_canon(t) for t in getattr(unidade, "termos_permitidos", set)()}
-        for expr in autorizados:
-            conhecidas |= set(expr.split())
-        for q in unidade.qualificacoes:
-            conhecidas |= {_canon(p) for p in q.split()}
-        conhecidas = {_canon(p) for p in conhecidas}
+    # 🔧 CALIBRAGEM. O fiscal procurava a frase literal e reprovava
+    # "que você declarou como parte de uma liquidação de inverno e também de uma
+    # queima de estoque" — onde as DUAS qualificações estão inteiras, atribuídas ao
+    # lojista, sem virar fato apurado e sem ganhar causalidade. Exigir a frase exata
+    # é exigência de superfície: impede o redator de escrever português natural sem
+    # alterar verdade lógica nenhuma. E era o mesmo erro do defeito 6, uma camada
+    # acima — lá a forma do verbo, aqui a forma da qualificação.
+    for nucleo in (getattr(unidade, "nucleos", ()) or _nucleos_de(unidade)):
+        formas = {_canon(nucleo["evento"])}
+        if nucleo.get("trecho"):
+            formas.add(_canon(nucleo["trecho"]))
+        if not any(f in c for f in formas):
+            v.reprovar("qualificacao",
+                       "evento da qualificação ausente: %r" % nucleo["evento"])
+        elif not any(m in c for m in MARCADORES_ATRIBUICAO):
+            # Sem a atribuição, o evento do lojista vira fato apurado pelo NEXO —
+            # e essa troca de dono é exatamente o que a qualificação existe para
+            # impedir.
+            v.reprovar("qualificacao",
+                       "atribuição ao lojista perdida em %r" % nucleo["evento"])
 
-        desconhecidas = []
-        for tok in re.findall(r"[a-zA-ZÀ-ÿ$%]+", texto):
+    # ④ EXCESSO SEMÂNTICO — a frase introduziu CONTEÚDO que ninguém autorizou?
+    #
+    # ### Palavra nova ≠ conteúdo novo.
+    #
+    # Só reprova termo de uma CLASSE DE CONTEÚDO declarada — intensidade, conceito
+    # econômico, conselho, previsão — que a unidade não autorize. Artigo, preposição,
+    # flexão, pronome, ordem sintática e verbo de apresentação deixaram de ser payload:
+    # "totalizam" passa, "significativa" não.
+    if exigir_cobertura:
+        autorizadas = set(PALAVRAS_FUNCIONAIS) | set(MARCADORES_PROVENIENCIA)
+        for campo in unidade.par:
+            autorizadas |= {_canon(r) for r in ROTULOS.get(campo, ())}
+            autorizadas |= {_canon(x) for x in ROTULO_PUBLICO.get(campo, "").split()}
+        autorizadas |= {_canon(t) for t in getattr(unidade, "termos_permitidos", set)()}
+        for expr in autorizados:
+            autorizadas |= set(expr.split())
+        for q in unidade.qualificacoes:
+            autorizadas |= {_canon(x) for x in q.split()}
+        autorizadas = {_canon(x) for x in autorizadas}
+
+        novos = []
+        for tok in re.findall(r"[a-zA-ZÀ-ÿ$]+", texto):
             t = _canon(tok)
-            if t and t not in conhecidas and not t.isdigit():
-                desconhecidas.append(tok)
-        if desconhecidas:
-            v.reprovar("excesso", "termos fora do declarado: %s"
-                       % ", ".join(sorted(set(desconhecidas))))
+            if not t or t in autorizadas:
+                continue
+            classe = LEXICO_SEMANTICO.get(t)
+            if classe:
+                v.reprovar("excesso", "%r introduz %s não autorizado em %s"
+                           % (tok, classe, unidade.id))
+            else:
+                novos.append(tok)
+        # 🔻 O PREÇO DA CALIBRAGEM, declarado em vez de escondido: termo sem classe
+        # não reprova mais. Ele passa a ser MEDIDO — é por aqui que a governança do
+        # vocabulário (#093 §6b) vê o que o modelo introduz e decide o que promover.
+        # Mede-se o que se deixou de barrar.
+        v.termos_novos = sorted(set(novos))
     return v
 
 

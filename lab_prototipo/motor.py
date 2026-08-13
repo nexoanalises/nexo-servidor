@@ -25,14 +25,18 @@ class Conclusao:
     """
 
     def __init__(self, cid, par, elo, estado, fatos, valor_derivado=None,
-                 qualificacoes=(), urgencia="nao_apurada", toca=(), semantica=None):
+                 qualificacoes=(), urgencia="nao_apurada", toca=(), semantica=None,
+                 nucleos=()):
         self.id = cid
         self.par = par
         self.elo = elo
         self.estado = estado                                  # formada | enfraquecida | contradita
         self.fatos = fatos                                    # {campo: valor} — os únicos números citáveis
         self.valor_derivado = valor_derivado                  # o único número NOVO que pode aparecer
-        self.qualificacoes = tuple(qualificacoes)             # texto que a redação é OBRIGADA a preservar
+        self.qualificacoes = tuple(qualificacoes)             # a frase sugerida ao redator
+        # 🔑 O que o Fiscal 10 realmente exige de volta: evento nomeado + atribuição ao
+        # lojista. A FORMA da frase é sugestão; o NÚCLEO é obrigação.
+        self.nucleos = tuple(nucleos)
         self.urgencia = urgencia
         # Tópicos de decisão que esta conclusão coloca em avaliação. É o canal pelo
         # qual a evidência — e não a preocupação declarada — decide se um limite
@@ -155,12 +159,20 @@ def _freios(evidencias):
     "o mais forte vence": cada freio ACRESCENTA uma restrição, e a conclusão precisa
     satisfazer todas.
     """
-    qualificacoes = []
+    qualificacoes, nucleos = [], []
     for ev in evidencias.values():
         for freio in ev.vinculos.get("freios", ()):
-            if freio["qualificacao"] not in qualificacoes:
-                qualificacoes.append(freio["qualificacao"])
-    return qualificacoes
+            if freio["qualificacao"] in qualificacoes:
+                continue
+            qualificacoes.append(freio["qualificacao"])
+            # 🔑 O NÚCLEO da qualificação — o que ela protege de verdade:
+            #   ① o EVENTO continua nomeado
+            #   ② ele continua sendo declaração DELE, nunca fato apurado pelo NEXO
+            # A frase pode ser reescrita. Estas duas coisas, não.
+            nucleos.append({"evento": freio["termo"],
+                            "trecho": freio.get("trecho"),
+                            "frase": freio["qualificacao"]})
+    return qualificacoes, nucleos
 
 
 def _elo_satisfeito(decl, evidencias):
@@ -249,7 +261,7 @@ def avaliar(ambiente, evidencias, abstencoes=(), preocupacao=None):
                                       "proporção indefinida: %s vale zero" % b))
             continue
 
-        qualificacoes = _freios(evidencias)
+        qualificacoes, nucleos = _freios(evidencias)
         estado = "enfraquecida" if qualificacoes else "formada"
 
         conclusoes.append(Conclusao(
@@ -257,6 +269,7 @@ def avaliar(ambiente, evidencias, abstencoes=(), preocupacao=None):
             fatos={a: evidencias[a].valor, b: evidencias[b].valor},
             valor_derivado=derivado,
             qualificacoes=qualificacoes,
+            nucleos=nucleos,
             urgencia=_urgencia(decl, evidencias),
             toca=decl.get("toca", ()),
             semantica={c: _ficha(evidencias[c]) for c in (a, b)},

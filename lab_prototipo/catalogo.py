@@ -400,3 +400,74 @@ def formas_aceitas(verbos):
     for v in verbos:
         aceitas.update(FORMAS_DO_VERBO.get(v, (v,)))
     return aceitas
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# LÉXICO SEMÂNTICO — o que a checagem ④ passa a fiscalizar.
+#
+# 🔑 A CALIBRAGEM QUE A RODADA 4 JUSTIFICOU, e ela troca a pergunta do fiscal:
+#
+#     ❌ antes:  "existe alguma palavra que não estava declarada?"   → excesso LEXICAL
+#     ✅ agora:  "foi introduzido CONTEÚDO que ninguém autorizou?"   → excesso SEMÂNTICO
+#
+#     ### Palavra nova ≠ conteúdo novo.
+#
+# `totalizam` em "os descontos, que totalizam R$ 6.200" não acrescenta fato, número,
+# intensidade, conceito, causa nem conselho: é realização linguística de um valor que
+# a unidade já carrega. Reprovar isso transforma o redator num template ruim — e aí
+# não haveria razão para manter um modelo generativo na etapa 10.
+#
+# ⚠️ E ISTO NÃO É A BLACKLIST QUE O #092 REJEITOU. Aquela listava FRASES PROIBIDAS de
+# uma ideia — e um sinônimo a contornava. Esta é um inventário de CLASSES DE CONTEÚDO
+# que exigem autorização: um sinônimo de "significativa" pertence à mesma classe e cai
+# na mesma regra. A autorização vem da unidade, não da lista.
+#
+# 🔻 E O PREÇO, declarado: sem a cobertura total, um termo causal que não esteja
+# declarado em lugar nenhum deixa de ser barrado por ④ (a ② segue barrando os
+# declarados). Por isso a novidade lexical não desaparece — ela passa a ser MEDIDA:
+# o registro devolve `termos_novos`, e é por ali que a governança do vocabulário
+# (#093 §6b) decide o que promover. Mede-se o que se deixou de barrar.
+
+_CLASSES_SEMANTICAS = {
+    # ① INTENSIDADE E MATERIALIDADE — grau que o Motor não apurou
+    "intensidade": """
+        significativa significativo significativas significativos expressiva expressivo
+        considerável considerable substancial substancial grande grandes enorme enormes
+        alta alto altas altos elevada elevado elevadas elevados baixa baixo baixas baixos
+        pequena pequeno pequenas pequenos mínima mínimo forte fortes fraca fraco
+        preocupante preocupantes crítica crítico críticas críticos grave graves séria sério
+        relevante relevantes importante importantes principal principais maior menor
+        excessiva excessivo exagerada exagerado ótima ótimo excelente ruim péssima péssimo
+        saudável saudáveis ideal apenas somente só bastante muito pouco demais
+    """,
+    # ② CONCEITO ECONÔMICO — outro conceito, ainda que o número esteja certo
+    "conceito_economico": """
+        margem margens lucro lucros prejuízo prejuízos receita receitas faturamento
+        custo custos despesa despesas rentabilidade giro ticket capital caixa fluxo
+        estoque estoques ruptura rupturas inadimplência sazonalidade demanda
+        concorrência concorrente precificação preço preços desconto descontos
+        confiabilidade falta faltas acessório acessórios categoria categorias
+        fornecedor fornecedores validade capacidade
+    """,
+    # ③ CONSELHO E MODALIDADE — decisão que a etapa 10 não tem
+    "conselho": """
+        deve deveria devem deveriam precisa precisam necessário necessária recomenda
+        recomendo recomendamos recomendável sugere sugiro sugerimos considere avalie
+        reduza aumente corte negocie renegocie revise priorize invista foque
+        convém cabe urgente imediato aconselho procure tente busque
+    """,
+    # ④ PREVISÃO — o futuro nunca foi apurado
+    "previsao": """
+        tende tendem tenderá projeta projetam espera-se estimativa estimado previsão
+        provavelmente possivelmente futuro futura próxima próximo continuará
+    """,
+}
+
+LEXICO_SEMANTICO = {t: classe
+                    for classe, blob in _CLASSES_SEMANTICAS.items()
+                    for t in blob.split()}
+
+# Marcadores que sustentam a ATRIBUIÇÃO AO LOJISTA numa qualificação. O que a
+# qualificação protege não é a frase: é que o evento continue sendo declaração DELE,
+# nunca fato apurado pelo NEXO.
+MARCADORES_ATRIBUICAO = ("declarou", "declarado", "declarada", "declarados", "declaradas")

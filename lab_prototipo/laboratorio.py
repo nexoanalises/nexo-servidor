@@ -132,9 +132,11 @@ def _classificar(veredito):
         achados.append("④_qualificacao_perdida")
     if any(p in LEXICO_CONSELHO for p in veredito.texto.lower().split()):
         achados.append("⑤_conselho_dentro_da_unidade")
-    # ⑥ — o único problema foi cobertura léxica: candidata a frase FIEL barrada.
+    # ⑥ mudou de sentido com a calibragem. Antes a ④ reprovava NOVIDADE LEXICAL, e
+    # uma reprova só por excesso era candidata a frase fiel barrada. Agora ela só
+    # reprova CONTEÚDO de classe declarada — então isto virou excesso semântico REAL.
     if checagens == {"excesso"}:
-        achados.append("⑥_so_excesso_candidata_a_calibragem")
+        achados.append("⑥_excesso_semantico_real")
     return achados
 
 
@@ -146,7 +148,7 @@ def rodar_laboratorio(chamar, casos=None, exigir_cobertura=True):
     """
     casos = casos if casos is not None else CASOS
     registro = {"unidades": [], "totais": {}, "erros": []}
-    contagem = {}
+    contagem, novos = {}, {}
 
     for caso in casos:
         evidencias, abstencoes = normalizar_formulario(caso["dados"])
@@ -166,6 +168,8 @@ def rodar_laboratorio(chamar, casos=None, exigir_cobertura=True):
             achados = [] if v.aprovado else _classificar(v)
             for a in achados:
                 contagem[a] = contagem.get(a, 0) + 1
+            for t in v.termos_novos:
+                novos[t] = novos.get(t, 0) + 1
 
             registro["unidades"].append({
                 "caso": caso["nome"],
@@ -181,6 +185,7 @@ def rodar_laboratorio(chamar, casos=None, exigir_cobertura=True):
                 "aprovado": v.aprovado,
                 "falhas": [{"checagem": c, "detalhe": d} for c, d in v.falhas],
                 "achados": achados,
+                "termos_novos": v.termos_novos,
             })
 
     us = registro["unidades"]
@@ -190,9 +195,13 @@ def rodar_laboratorio(chamar, casos=None, exigir_cobertura=True):
         "aprovadas": aprovadas,
         "reprovadas": len(us) - aprovadas,
         "por_achado": contagem,
+        # 🔻 O que a calibragem deixou de barrar, contado. Não é falha: é a matéria-
+        # prima da governança do vocabulário — o que o modelo introduz e ninguém
+        # classificou ainda.
+        "novidade_lexical": dict(sorted(novos.items(), key=lambda kv: -kv[1])),
         # A leitura que decide a calibragem: destas reprovas, quantas foram só por
         # cobertura léxica — ou seja, quantas podem ser linguagem fiel barrada.
-        "candidatas_a_calibragem": contagem.get("⑥_so_excesso_candidata_a_calibragem", 0),
+        "excesso_semantico": contagem.get("⑥_excesso_semantico_real", 0),
     }
     return registro
 
@@ -215,6 +224,10 @@ def imprimir(registro):
                "  reprovadas ............... %d" % t.get("reprovadas", 0)]
     for achado, n in sorted(t.get("por_achado", {}).items()):
         linhas.append("  %-40s %d" % (achado, n))
+    novidade = t.get("novidade_lexical") or {}
+    if novidade:
+        linhas.append("  novidade lexical (medida, não reprova):")
+        linhas.append("    " + " · ".join("%s×%d" % (k, n) for k, n in novidade.items()))
     if registro["erros"]:
         linhas.append("  ⚠️ erros de chamada ....... %d" % len(registro["erros"]))
     return "\n".join(linhas)
