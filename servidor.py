@@ -1615,7 +1615,18 @@ def _viol(regra, detalhe, trecho="", bloqueia=False, campo="", observa=False):
     Checagem nova estreia assim. O motivo é custo medido, não cerimônia: retentativa
     dobra o consumo (6.299 → ~13.400 tokens) de um teto DIÁRIO compartilhado com
     cliente pagante — um falso positivo novo tira análise da mão de quem pagou.
-    Mede-se a taxa de disparo no log e só então se promove a checagem."""
+    Mede-se a taxa de disparo no log e só então se promove a checagem.
+
+    ⚖️ A EXCEÇÃO, congelada no #099 para que a convenção não vire dogma:
+
+        Validação nova pode ESTREAR BLOQUEANDO quando a falha é DETERMINÍSTICA, a
+        dependência é EXPLÍCITA, e permitir a saída produziria CONTRADIÇÃO com um
+        fato que o próprio NEXO Análise já invalidou.
+
+    A convenção protege contra falso positivo de checagem discutível. Quando não há
+    o que discutir — `faturamento − custos ≠ lucro`, e o Radar já publicou isso —
+    deixar passar não é prudência: é publicar contradição. Única checagem hoje sob
+    a exceção: `conclusão sobre número inválido`."""
     return {"regra": regra, "detalhe": detalhe, "trecho": trecho[:90],
             "bloqueia": bloqueia, "campo": campo, "observa": observa}
 
