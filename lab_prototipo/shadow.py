@@ -26,7 +26,7 @@
 # não vai para log nenhum.
 
 from catalogo import PARES
-from entrada import normalizar_formulario
+from entrada import falta_estruturada, margem_estruturada, normalizar_formulario
 from laboratorio import prompt_da_unidade
 from motor import avaliar
 from saida import fiscal_10
@@ -75,6 +75,49 @@ MAPA_CAMPOS = {
 # não necessidade nova do produto: NENHUM campo foi criado.
 SEM_CORRESPONDENTE = {}
 
+# ─────────────────────────────────────────────────────────────────────────────
+# ⚖️ A REGRA DE MIGRAÇÃO, congelada pelo fundador (#097)
+#
+#     ### ESTRUTURADO TEM PRECEDÊNCIA. LEGADO NUNCA SOBRESCREVE ESTRUTURADO.
+#
+# Onde a resposta veio de seleção, o texto NEM É CONSULTADO. Isso não é otimização:
+# é o que impede a interpretação de voltar pela porta dos fundos. Se o Fiscal 0
+# reinterpretasse o item livre para "conferir" a categoria, ele estaria fazendo
+# exatamente o que a coleta estruturada existe para tornar desnecessário.
+#
+#     ESTRUTURADO → fonte SEMÂNTICA        (decide)
+#     TEXTO       → detalhe / PROVENIÊNCIA (endereça, humaniza)
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def _estruturado(brutos):
+    """Evidências que já nasceram decididas no formulário, e o que elas ocupam.
+
+    Devolve (evidencias, campos_legados_a_ignorar, observado) — o terceiro é o que
+    o shadow REGISTRA sem consumir: hoje, o "Não" explícito da ruptura.
+    """
+    evidencias, ocupados, observado = {}, set(), {}
+
+    ocorreu = (brutos.get("falta_ocorreu") or "").strip()
+    if ocorreu:
+        ocupados.add("o_que_faltou")
+        observado["falta_ocorreu"] = ocorreu
+        ev = falta_estruturada(ocorreu, brutos.get("falta_categoria"),
+                               brutos.get("falta_item"))
+        if ev is not None:
+            evidencias["falta_declarada"] = ev
+
+    melhor, pior = brutos.get("margem_melhor"), brutos.get("margem_pior")
+    if (melhor or "").strip() or (pior or "").strip():
+        ocupados.add("margem_categoria")
+        observado["margem_melhor"] = (melhor or "").strip()
+        observado["margem_pior"] = (pior or "").strip()
+        ev = margem_estruturada(melhor, pior)
+        if ev is not None:
+            evidencias["margem_categoria"] = ev
+
+    return evidencias, ocupados, observado
+
 
 def _fmt_br(v):
     if v is None:
@@ -104,13 +147,19 @@ def observar(segmento, brutos, relatorio="", chamar=None, preocupacao=None):
     for campo, motivo in SEM_CORRESPONDENTE.get(ambiente, {}).items():
         reg["campos_ausentes_no_produto"].append({"campo": campo, "motivo": motivo})
 
+    estruturadas, ocupados, observado = _estruturado(brutos)
+    reg["estruturado"] = observado
+
     mapa = MAPA_CAMPOS[ambiente]
     traduzidos = {destino: brutos[origem]
                   for origem, destino in mapa.items()
-                  if brutos.get(origem) not in (None, "")}
-    reg["campos_lidos"] = sorted(traduzidos)
+                  if brutos.get(origem) not in (None, "") and origem not in ocupados}
+    reg["campos_lidos"] = sorted(set(traduzidos) | set(estruturadas))
 
     evidencias, abstencoes = normalizar_formulario(traduzidos)
+    # A precedência acontece AQUI, e numa linha: o que veio estruturado entra por
+    # cima, e o legado correspondente nem chegou a ser lido (foi filtrado acima).
+    evidencias.update(estruturadas)
     conclusoes, limites, silencios = avaliar(
         ambiente, evidencias, abstencoes, preocupacao)
 
@@ -170,6 +219,9 @@ def detalhe(reg):
     if not reg.get("ambiente"):
         return ["  motivo: %s" % reg.get("motivo", "")]
     linhas = ["  campos lidos: %s" % (", ".join(reg.get("campos_lidos", [])) or "—")]
+    if reg.get("estruturado"):
+        linhas.append("  ⌨️ estruturado (precedência): %s"
+                      % " · ".join("%s=%s" % kv for kv in sorted(reg["estruturado"].items())))
     for c in reg["campos_ausentes_no_produto"]:
         linhas.append("  🔴 campo ausente no produto · %s — %s" % (c["campo"], c["motivo"]))
     for a in reg["abstencoes"]:
@@ -226,6 +278,10 @@ def sanear(reg):
         "pares_declarados": reg.get("pares_declarados", 0),
         "campos_lidos": reg.get("campos_lidos", []),
         "abstencoes": [a["campo"] for a in reg.get("abstencoes", [])],
+        # O que veio de seleção. Inclui o "Não" explícito da ruptura, que é
+        # informação nova (#098) e que NENHUMA decisão consome hoje — registrar sem
+        # consumir é o honesto enquanto nenhum mapa o pedir.
+        "estruturado": reg.get("estruturado", {}),
         "silencios": [{"par": s["par"], "caso": s["caso"]}
                       for s in reg.get("silencios", [])],
         "limites": [{"par": l["par"], "publicaria": l["publicaria"],

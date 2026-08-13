@@ -19,7 +19,7 @@ import unicodedata
 
 from catalogo import (
     CATEGORIAS, EVENTOS_FREIO, MARCADORES_FALTA, NATUREZA, PERTENCIMENTO,
-    QUALIFICADORES_MARGEM,
+    QUALIFICADORES_MARGEM, ROTULO_APP_CATEGORIA, ROTULO_APP_MARGEM,
 )
 
 
@@ -265,3 +265,59 @@ def normalizar_formulario(dados):
         else:
             evidencias[campo] = r
     return evidencias, abstencoes
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# ETAPA 0 QUANDO A RESPOSTA JÁ NASCEU ESTRUTURADA (#097)
+#
+# 🔑 O Fiscal 0 não tem o que provar aqui, e isso não é atalho — é consequência:
+#
+#     ① extração literal ........ o valor É a opção que ele marcou
+#     ② classificação semântica . a lista do formulário É o vocabulário aprovado
+#     ③ relação semântica ....... continua NÃO sendo dele, é do Motor
+#
+# É o encolhimento que a lei da coleta prometeu: ele deixa de adivinhar "melhor
+# margem" em centenas de formas e passa a trabalhar só onde linguagem livre agrega.
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _de_estruturado(campo, vinculos, publicavel):
+    ev = Evidencia(campo, publicavel, "declarado_estruturado", origem_texto=None,
+                   vinculos=vinculos)
+    return ev
+
+
+def falta_estruturada(ocorreu, categoria_app, item):
+    """`falta_ocorreu` + `falta_categoria` + `falta_item` → evidência de ruptura.
+
+    ⚠️ "Não" e "Não sei" NÃO produzem evidência de falta. O "Não" é informação nova
+    (#098) e fica registrado pelo shadow, mas nenhuma decisão o consome hoje —
+    inventar uma aqui seria decidir por conta própria o que nenhum mapa pediu.
+    """
+    if (ocorreu or "").strip() != "Sim":
+        return None
+    vinculos = {"fato": "falta"}
+    categoria = ROTULO_APP_CATEGORIA.get((categoria_app or "").strip())
+    if categoria:
+        vinculos["categoria"] = categoria
+        vinculos["item"] = (item or "").strip() or categoria_app.strip()
+        vinculos["trecho_item"] = (item or "").strip() or categoria_app.strip()
+    publicavel = ("falta de %s" % vinculos["item"]) if vinculos.get("item") else "falta declarada"
+    return _de_estruturado("falta_declarada", vinculos, publicavel)
+
+
+def margem_estruturada(melhor_app, pior_app):
+    """`margem_melhor` + `margem_pior` → a margem DECLARADA por categoria.
+
+    O trecho guardado é o rótulo que ele marcou: foi o que ele disse, clicando. E a
+    atribuição continua obrigatória na saída — margem declarada nunca vira apurada.
+    """
+    margens = {}
+    for rotulo, qualificador in ((melhor_app, "margem_alta"), (pior_app, "margem_baixa")):
+        rotulo = (rotulo or "").strip()
+        categoria = ROTULO_APP_MARGEM.get(rotulo)
+        if categoria and categoria not in margens:
+            margens[categoria] = {"qualificador": qualificador, "trecho": rotulo}
+    if not margens:
+        return None
+    return _de_estruturado("margem_categoria", {"margens": margens},
+                           "margem declarada para %s" % " · ".join(sorted(margens)))

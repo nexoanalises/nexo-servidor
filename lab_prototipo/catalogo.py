@@ -520,3 +520,34 @@ LEXICO_SEMANTICO = {t: classe
 # qualificação protege não é a frase: é que o evento continue sendo declaração DELE,
 # nunca fato apurado pelo NEXO.
 MARCADORES_ATRIBUICAO = ("declarou", "declarado", "declarada", "declarados", "declaradas")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# A PONTE COM A COLETA ESTRUTURADA (#097)
+#
+# 🔑 Aqui o Fiscal 0 ENCOLHE, e é o ganho que a lei da coleta prometeu: quando a
+# resposta nasce de uma seleção, os níveis 1 e 2 dele já estão satisfeitos POR
+# CONSTRUÇÃO — a extração é literal (o valor É a opção) e a classificação semântica
+# veio de vocabulário aprovado (a lista do formulário). Não há o que provar.
+#
+# ⛔ O que NÃO muda: o nível 3 continua fora dele. Relação semântica entre evidências
+# segue sendo do Motor, venha o dado de texto ou de clique.
+#
+# ⚠️ "Outro" e "Não sei" NÃO viram categoria. São as saídas honestas do formulário, e
+# transformá-las em categoria seria fabricar a estrutura que elas existem para evitar.
+# ─────────────────────────────────────────────────────────────────────────────
+
+ROTULO_APP_CATEGORIA = {
+    "Aparelho": "aparelho",
+    "Acessório": "acessorio",
+    "Peça/assistência": "servico",
+}
+
+ROTULO_APP_MARGEM = {
+    "Venda de aparelhos": "aparelho",
+    "Acessórios": "acessorio",
+    "Assistência/consertos": "servico",
+}
+
+# As duas saídas honestas. Chegando qualquer uma, o campo não produz vínculo nenhum.
+ESCAPES_APP = ("Outro", "Não sei", "")
