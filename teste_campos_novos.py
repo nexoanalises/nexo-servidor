@@ -44,7 +44,13 @@ caso("publica a composição", "Composição dos custos" in t, True)
 caso("mostra a compra", "R$ 28.500" in t, True)
 caso("calcula o custo fixo (46.900 − 28.500)", "R$ 18.400" in t, True)
 caso("diz o peso da compra", "60,8%" in t, True)
-caso("nomeia o que o lojista sente", "virou estoque não sumiu" in t, True)
+# 🔴 A frase "o dinheiro que virou estoque não sumiu — está na prateleira" SAIU em
+# 13/08, por veredito do fundador: ela trata TODA a compra como estoque remanescente,
+# e no mesmo relatório o Motor calculava que R$ 34.000 tinham SAÍDO do estoque. Parte
+# da compra vira venda; quanto permanece exige outra relação — que agora é publicada
+# como "Compra × saída", quando há dois períodos para calculá-la.
+caso("⛔ não afirma que a compra ficou na prateleira",
+     "virou estoque não sumiu" in t, False)
 
 print("\n=== e quando o número não fecha, DECLARA em vez de usar ===")
 t = linhas(payload("compra_mercadoria: 99.000\n"))

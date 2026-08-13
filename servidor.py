@@ -969,6 +969,75 @@ _LEITURA_CICLO = {
     ("nao", False):     "A recomendação não chegou a ser testada. Ela continua de pé.",
 }
 
+# 🔴 O TERCEIRO ESTADO, que faltava — e a falta dele produziu a pior frase já publicada.
+#
+# Análise real de 13/08, segundo ciclo do "Celular Legal": faturamento +10%, ticket
+# +13,3%, clientes +36,8%, conversão +15 pontos — e lucro −6,7%, margem −3,8 pontos,
+# estoque +50%. O produto escreveu:
+#
+#     "Você executou e o resultado NÃO VEIO. O caminho não é insistir."
+#
+# Porque `melhorou` era decidido por UMA linha: `lucro >= lucro_ant`. Quatro medidas
+# avançaram e uma caiu, e o veredito olhou só a que caiu.
+#
+# 🔴 E o mais grave: a recomendação era LIQUIDAR ENCALHE — que o próprio prompt define
+# como "sacrificar margem DE PROPÓSITO para recuperar caixa". O produto mandou
+# sacrificar margem e depois reprovou o lojista porque a margem caiu.
+#
+# ⛔ RESULTADO MISTO NÃO É RESULTADO QUE NÃO VEIO.
+
+# Direção de cada comparável: para onde ele precisa ir para ser "melhor".
+_DIRECAO_COMPARAVEL = {
+    "faturamento": +1, "lucro": +1, "ticket_medio": +1, "clientes": +1,
+    "conversao": +1,
+    # Custo e estoque subindo é PIOR: mais capital parado, mais dinheiro saindo.
+    "custos": -1, "estoque_valor": -1,
+}
+
+_ROTULO_COMPARAVEL = {
+    "faturamento": "faturamento", "lucro": "lucro", "ticket_medio": "ticket",
+    "clientes": "clientes", "conversao": "conversão", "custos": "custos",
+    "estoque_valor": "estoque",
+}
+
+
+def _lista_pt(itens):
+    itens = [_ROTULO_COMPARAVEL[k] for k in itens]
+    return itens[0] if len(itens) == 1 else ", ".join(itens[:-1]) + " e " + itens[-1]
+
+
+def _leitura_mista(avancaram, recuaram):
+    """A frase do resultado MISTO — observa, compara e PRESERVA CAUSALIDADE.
+
+    A última oração não é cortesia: sem ela, listar o que subiu logo depois de dizer
+    "você executou" ATRIBUI o movimento às ações. O NEXO comparou; não mediu causa.
+
+    ⚠️ E o verbo segue o MOVIMENTO, não a avaliação: custo e estoque que pioraram
+    SUBIRAM, não recuaram. Dizer "os custos recuaram" quando eles subiram inverteria
+    o fato para poder usar uma palavra só.
+    """
+    caiu = [k for k in recuaram if _DIRECAO_COMPARAVEL[k] > 0]
+    subiu = [k for k in recuaram if _DIRECAO_COMPARAVEL[k] < 0]
+    piorou = " e ".join(p for p in (
+        f"{_lista_pt(caiu)} {'recuou' if len(caiu) == 1 else 'recuaram'}" if caiu else "",
+        f"{_lista_pt(subiu)} {'subiu' if len(subiu) == 1 else 'subiram'}" if subiu else "",
+    ) if p)
+    return ("Você executou as ações do ciclo anterior. Os resultados foram MISTOS: "
+            f"{_lista_pt(avancaram)} avançaram, enquanto {piorou}. "
+            "Com os dados disponíveis, o NEXO não atribui essas variações às ações "
+            "executadas.")
+
+
+def _classificar_ciclo(a, ant):
+    """Devolve (avancaram, recuaram) entre os comparáveis que existem nos dois períodos."""
+    avancaram, recuaram = [], []
+    for campo, direcao in _DIRECAO_COMPARAVEL.items():
+        atual, anterior = a.get(campo), ant.get(campo)
+        if atual is None or anterior is None or atual == anterior:
+            continue
+        (avancaram if (atual > anterior) == (direcao > 0) else recuaram).append(campo)
+    return avancaram, recuaram
+
 def _bloco_ciclo(dados, indicadores=()):
     """§2 CICLO ANTERIOR — escrita por CÓDIGO.
 
@@ -1026,7 +1095,12 @@ def _bloco_ciclo(dados, indicadores=()):
     if mudou:
         linhas.append(f"O que mudou por sua conta: {mudou}")
 
-    if chave and melhorou is not None:
+    # 🔴 O resultado MISTO tem leitura própria e vem ANTES da tabela binária: quatro
+    # medidas avançando e uma caindo não é "o resultado não veio".
+    avancaram, recuaram = _classificar_ciclo(a, ant)
+    if chave == "sim" and avancaram and recuaram:
+        linhas.append(_leitura_mista(avancaram, recuaram))
+    elif chave and melhorou is not None:
         linhas.append(_LEITURA_CICLO[(chave, melhorou)])
     else:
         # 🔴 A fronteira de execução: sem declaração, o produto NÃO escolhe entre as
@@ -1311,7 +1385,17 @@ def calcular_motor(dados):
             radar.append(
                 f"💰 Composição dos custos: R$ {_fmt_rs(compra)} foi compra de mercadoria "
                 f"({_fmt_br(pct)}% dos custos) e R$ {_fmt_rs(fixo)} é custo fixo e "
-                f"despesa. O dinheiro que virou estoque não sumiu — está na prateleira.")
+                f"despesa.")
+
+        # 🔴 A FRASE QUE SAIU DAQUI: "o dinheiro que virou estoque não sumiu — está na
+        # prateleira". Ela trata TODA a compra como estoque remanescente, e no mesmo
+        # relatório de 13/08 o Motor calculou que R$ 34.000 SAÍRAM do estoque. A compra
+        # não fica na prateleira: parte dela vira venda.
+        #
+        # ✅ E no lugar entra a relação que o produto JÁ TINHA e não usava: compras
+        # menos saída é EXATAMENTE a variação do estoque. Isso é apuração, não juízo —
+        # e diz ao lojista se ele comprou acima ou abaixo do que vendeu, que é a
+        # pergunta que o campo existe para responder.
 
     # ── O GIRO — a identidade do estoque, calculada em código (#088 · dados.md M6) ──
     # "O que devo comprar menos, comprar mais ou parar de comprar?" (veredito do
@@ -1363,6 +1447,18 @@ def calcular_motor(dados):
                         f"(giro de {_fmt_br(giro, 2)}x sobre o estoque médio) — no ritmo "
                         f"atual, o estoque de hoje (R$ {_fmt_rs(est_final)}) equivale a "
                         f"{_fmt_br(cobertura, 1)} meses de venda.")
+                    # ✅ COMPRA × SAÍDA — a relação que o produto já tinha e não dizia.
+                    # É subtração pura, e responde direto a pergunta do campo: comprei
+                    # mais ou menos do que vendi? ⛔ Sem adjetivo: o Motor informa a
+                    # direção, quem decide se está certo é o dono.
+                    delta = compra - saida
+                    if abs(delta) >= 1:
+                        sentido = ("acima" if delta > 0 else "abaixo")
+                        radar.append(
+                            f"🛒 Compra × saída: você comprou R$ {_fmt_rs(compra)} e saiu "
+                            f"R$ {_fmt_rs(saida)} — comprou R$ {_fmt_rs(abs(delta))} "
+                            f"{sentido} do que vendeu, e essa diferença é exatamente a "
+                            f"variação do estoque no período.")
             # saída <= 0 ou cobertura fora da faixa de sanidade: campo mal preenchido
             # produziria giro sem sentido — cala em vez de publicar.
         # compra ausente: a identidade não fecha sem as três pernas — cala em
@@ -1714,6 +1810,49 @@ _JULGA_LUCRO = re.compile(
     r"confort[áa]vel|excelente|[óo]tim|bom\b|boa\b|ruim\b|baix|fraco|alto)", re.I)
 
 
+# Indicadores que o Motor APURA e para os quais NÃO existe régua declarada. Informar
+# o número é entrega; dizer se ele é bom ou ruim é juízo sem fonte.
+# ⚠️ `margem` fora: ela tem rótulo próprio publicado pelo Motor, e o prompt manda usar.
+_INDICADOR_JULGADO = re.compile(
+    r"\b(giro|ticket m[ée]dio|convers[ãa]o|capacidade|cobertura|meses de venda)\b"
+    r"[^.]{0,90}?\b(inadequad\w+|adequad\w+|ruim|p[ée]ssim\w+|bom\b|boa\b|"
+    r"saud[áa]vel|preocupante|ideal|excelente|[óo]tim\w+|insuficiente|baix\w+|alt\w+|"
+    r"mal (gerenciad|administrad|dimensionad)\w*|gerenciad\w+ de forma)\b", re.I)
+
+_STOPWORDS_ACAO = frozenset("""
+a o as os um uma de do da dos das em no na nos nas por para com sem sobre e ou que
+se ao aos à às como mais menos até ser está estão foi ser custo resultado dias zero
+próximos próximas r$ ~ • - –
+""".split())
+
+
+def _palavras_acao(texto):
+    """Palavras de conteúdo de uma ação — o que sobra depois de tirar a moldura."""
+    return {p for p in re.findall(r"[a-zA-ZÀ-ÿ]{4,}", (texto or "").lower())
+            if p not in _STOPWORDS_ACAO}
+
+
+def _mesma_acao(a, b):
+    """Duas ações dizem a mesma coisa? Sobreposição de palavras de conteúdo ≥ 70%.
+
+    Não é semântica — é medida de repetição literal, que é exatamente o defeito:
+    o relatório devolveu as MESMAS frases do ciclo anterior.
+    """
+    pa, pb = _palavras_acao(a), _palavras_acao(b)
+    if len(pa) < 4 or len(pb) < 4:
+        return False
+    return len(pa & pb) / min(len(pa), len(pb)) >= 0.7
+
+
+def _acoes_anteriores(dados):
+    """As ações que o ciclo anterior recomendou, vindas do bloco do histórico."""
+    marca = "DECISÕES RECOMENDADAS NAQUELA ANÁLISE:"
+    if marca not in (dados or ""):
+        return []
+    bloco = dados.split(marca, 1)[1].split("=== DADOS ATUAIS ===")[0]
+    return [l.strip() for l in bloco.split("\n") if len(l.strip()) >= 20]
+
+
 def validar_saida(saida, dados, indicadores, radar):
     """🟠 BLOQUEIO DE SAÍDA — os dados estavam certos e a IA produziu algo inválido."""
     v = []
@@ -1816,6 +1955,40 @@ def validar_saida(saida, dados, indicadores, radar):
             v.append(_viol("intensidade não apurada",
                            "grau ('significativo', 'expressivo') não sai de nenhum "
                            "número calculado", linha, observa=True))
+
+    # 0g · 🔴 "MUDE A ABORDAGEM" SEGUIDO DA MESMA ABORDAGEM.
+    #
+    # Análise real de 13/08: o §2 disse *"o caminho não é insistir — é mudar a
+    # abordagem"* e o §7 devolveu **as três ações do ciclo anterior**, que o próprio
+    # §2 registrava como executadas. O relatório se contradiz dentro de si mesmo e
+    # manda o lojista repetir o que ele acabou de cumprir.
+    if re.search(r"não é insistir|mudar a abordagem|trocar de estrat", saida or "", re.I):
+        anteriores = _acoes_anteriores(dados)
+        if anteriores:
+            for linha in _secao_da_saida(saida, "AÇÕES"):
+                if len(linha.strip()) < 20:
+                    continue
+                if any(_mesma_acao(linha, ant) for ant in anteriores):
+                    v.append(_viol("manda mudar e repete a mesma ação",
+                                   "o ciclo disse que não é para insistir, e esta ação "
+                                   "repete o que já foi recomendado e executado", linha))
+
+    # 0h · 🔴 INDICADOR SEM BENCHMARK VIRANDO JUÍZO DE QUALIDADE.
+    #
+    # *"giro de 2,27x [...] pode ser um sinal de que o estoque está sendo gerenciado
+    # de forma INADEQUADA"*. O número sozinho não demonstra nada: não existe
+    # benchmark declarado que autorize a qualificação. O Motor pode INFORMAR o giro;
+    # não pode julgá-lo.
+    #
+    # ⚠️ `margem` fica de fora: para ela o Motor PUBLICA um rótulo próprio, e o prompt
+    # manda usar exatamente aquele. Onde há régua declarada, há juízo autorizado.
+    for linha in (saida or "").split("\n"):
+        if linha.strip() in {l.strip() for l in (radar or [])}:
+            continue
+        if _INDICADOR_JULGADO.search(linha):
+            v.append(_viol("indicador sem benchmark virando juízo",
+                           "não há régua declarada que diga se este número é bom ou "
+                           "ruim — o Motor informa o indicador, não o qualifica", linha))
 
     # 1 · número sem fonte (a seção de METAS é alvo proposto, tratada abaixo)
     for linha in (saida or "").split("\n"):

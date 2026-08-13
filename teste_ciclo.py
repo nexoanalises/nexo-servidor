@@ -60,11 +60,22 @@ caso("cita a ação do blazer", "blazer de alfaiataria" in b, True)
 caso("cita a do fornecedor", "Malharia Vale" in b, True)
 caso("não traz a meta como se fosse ação", "13.000" in b, False)
 
-print("\n=== as quatro leituras ===")
+print("\n=== as leituras ===")
 # lucro caiu (12.000 -> 7.900) = não melhorou · lucro subiu (12.000 -> 15.000) = melhorou
+#
+# 🔴 MUDOU EM 13/08, e a mudança vale nas DUAS direções. Este payload tem faturamento
+# 70.000 → 54.800 (−22%), custos 50.000 → 46.900 (melhor) e lucro que sobe ou desce.
+# É RESULTADO MISTO — e o veredito saía de UMA linha só, `lucro >= lucro_ant`.
+#
+# Com o lucro subindo, o produto dizia "repetir é a aposta mais segura" enquanto o
+# faturamento caía 22%: parabenizava por uma queda de um quinto da receita. Com o
+# lucro caindo, dizia "o resultado não veio" ignorando que os custos melhoraram.
+#
+# ⚠️ Os dois são a MESMA falha, e a regra congelada pelo fundador — "resultado misto
+# não pode virar resultado que não veio" — não tem lado: vale igual para o elogio.
 for executou, lucro, trecho in [
-        ("Sim, todas",   "15.000", "Repetir é a aposta mais segura"),
-        ("Sim, todas",   "7.900",  "não é insistir — é mudar a abordagem"),
+        ("Sim, todas",   "15.000", "Os resultados foram MISTOS"),
+        ("Sim, todas",   "7.900",  "Os resultados foram MISTOS"),
         ("Não executei", "15.000", "Vale descobrir o que puxou"),
         ("Não executei", "7.900",  "não chegou a ser testada"),
         ("Em parte",     "15.000", "terminar o que ficou pela metade"),
@@ -76,7 +87,11 @@ print("\n=== 🔴 o par que hoje recebe o MESMO conselho ===")
 b_falhou = "\n".join(S._bloco_ciclo(payload("Sim, todas", lucro="7.900")))
 b_nao_fez = "\n".join(S._bloco_ciclo(payload("Não executei", lucro="7.900")))
 caso("mesmos números, conselhos diferentes", b_falhou == b_nao_fez, False)
-caso("quem tentou ouve 'mude'", "mudar a abordagem" in b_falhou, True)
+# 🔴 Quem tentou passa a ouvir a leitura MISTA — que é o que os números dizem, e que
+# preserva causalidade onde "mude a abordagem" não preservava.
+caso("quem tentou ouve a leitura mista", "MISTOS" in b_falhou, True)
+caso("e ela não atribui o movimento às ações",
+     "não atribui essas variações às ações" in b_falhou, True)
 caso("quem não tentou ouve 'continua de pé'", "continua de pé" in b_nao_fez, True)
 
 print("\n=== o acoes_quais aparece no relatório (a condição do fundador) ===")
@@ -96,7 +111,15 @@ caso("cita a mudança declarada", "O que mudou por sua conta: troquei de fornece
 
 print("\n=== sem lucro comparável, não inventa leitura ===")
 b = "\n".join(S._bloco_ciclo(payload("Sim, todas", lucro="")))
-caso("cai na declaração de não atribuição", "sem atribuí-lo" in b, True)
+# 🔴 O INVARIANTE É A NÃO ATRIBUIÇÃO, não a frase que a carrega. Sem lucro, faturamento
+# e custos continuam comparáveis — a leitura MISTA se forma com o que existe, e ela
+# já traz a não atribuição dentro. Exigir a frase antiga seria exigir que o produto
+# calasse sobre dois números que ele tem.
+caso("declara que não atribui, de um jeito ou de outro",
+     ("sem atribuí-lo" in b) or ("não atribui essas variações" in b), True)
+# ⛔ E o que continua proibido: escolher a história do sucesso ou do fracasso.
+for t in ["Repetir é a aposta", "mudar a abordagem", "resultado não veio"]:
+    caso(f"e não escolhe história: {t}", t in b, False)
 
 print(f"\n{'='*54}\n  {ok} passaram · {falhou} falharam\n{'='*54}")
 sys.exit(1 if falhou else 0)

@@ -268,6 +268,88 @@ caso("com período anterior, variação é permitida",
          "O faturamento cresceu em relação ao período anterior.",
          COM_ANT, ind_c2, rad_c2), False)
 
+print("\n=== 10. AS TRÊS REGRESSÕES DO SEGUNDO CICLO (13/08) ===")
+# 🔴 Segundo ciclo do "Celular Legal". Faturamento +10%, ticket +13,3%, clientes
+# +36,8%, conversão +15 pontos — e lucro −6,7%, custos +15,6%, estoque +50%.
+A_ANT = ("faturamento: 60.000\ncustos: 45.000\nlucro: 15.000\nticket_medio: 450\n"
+         "clientes: 380\nconversao: 30\nestoque_valor: 12.000\n"
+         "compra_mercadoria: 38.000\n")
+A_AT = ("faturamento: 66.000\nmeta: 70.000\ncustos: 52.000\nlucro: 14.000\n"
+        "ticket_medio: 510\nclientes: 520\nconversao: 45\nestoque_valor: 18.000\n"
+        "compra_mercadoria: 40.000\nacoes_executadas: Sim, todas\n"
+        "acoes_quais: girei os encalhados\n")
+ACAO_ANTERIOR = ("Criar uma ação de giro para os aparelhos encalhados nos próximos 30 "
+                 "dias, definindo o desconto somente após verificar o custo, preço "
+                 "atual, margem e quantidade disponível.")
+CICLO = ("=== ANÁLISE ANTERIOR 1 (período: Julho 2026, feita em 13/08) ===\n"
+         "DADOS DAQUELA ANÁLISE:\n" + A_ANT +
+         "DECISÕES RECOMENDADAS NAQUELA ANÁLISE:\n" + ACAO_ANTERIOR +
+         "\n\n=== DADOS ATUAIS ===\n" + A_AT)
+ind_x, rad_x = S.calcular_motor(CICLO)
+
+print("  — ① resultado MISTO não vira 'resultado não veio' —")
+avanc, recu = S._classificar_ciclo(S._atuais(CICLO),
+                                   {k: S._num_br(v) for k, v in
+                                    (l.split(":", 1) for l in A_ANT.strip().split("\n"))})
+caso("quatro medidas avançaram", sorted(avanc),
+     ["clientes", "conversao", "faturamento", "ticket_medio"])
+caso("três pioraram", sorted(recu), ["custos", "estoque_valor", "lucro"])
+frase = S._leitura_mista(avanc, recu)
+caso("a leitura declara MISTOS", "MISTOS" in frase, True)
+caso("⛔ e NÃO diz que o resultado não veio", "não veio" in frase, False)
+# 🔴 A oração final não é cortesia: sem ela, listar o que subiu logo depois de
+# "você executou" ATRIBUI o movimento às ações.
+caso("preserva causalidade explicitamente",
+     "não atribui essas variações às ações" in frase, True)
+# ⚠️ Verbo segue o MOVIMENTO: custo e estoque que pioraram SUBIRAM.
+caso("custos e estoque SOBEM, não recuam",
+     "custos e estoque subiram" in frase, True)
+
+print("  — ② mandar mudar e repetir a mesma ação —")
+RUIM = ("2. O CICLO ANTERIOR\nVocê executou e o resultado não veio. O caminho não é "
+        "insistir — é mudar a abordagem.\n\n7. AÇÕES IMEDIATAS\n" + ACAO_ANTERIOR + "\n")
+BOA = ("2. O CICLO ANTERIOR\nVocê executou e o resultado não veio. O caminho não é "
+       "insistir — é mudar a abordagem.\n\n7. AÇÕES IMEDIATAS\n"
+       "Renegociar prazo com os dois maiores fornecedores neste mês.\n")
+
+
+def repete(txt):
+    return any("repete" in x["regra"]
+               for x in S.validar_saida(txt, CICLO, ind_x, rad_x))
+
+
+caso("repetir a ação do ciclo anterior é REPROVADO", repete(RUIM), True)
+caso("propor outra coisa passa", repete(BOA), False)
+
+print("  — ③ indicador sem benchmark não vira juízo —")
+
+
+def julga(txt):
+    return any("benchmark" in x["regra"]
+               for x in S.validar_saida(txt, CICLO, ind_x, rad_x))
+
+
+caso("'giro 2,27x → gerenciado de forma inadequada' é REPROVADO",
+     julga("O giro de 2,27x pode ser um sinal de que o estoque está sendo gerenciado "
+           "de forma inadequada."), True)
+caso("informar o giro passa",
+     julga("O giro do estoque foi de 2,27x sobre o estoque médio."), False)
+# ⚠️ A margem TEM régua declarada — o Motor publica o rótulo e o prompt manda usar.
+caso("a margem com o rótulo do Motor continua passando",
+     julga("A margem líquida é de 21,2% (margem saudável)."), False)
+
+print("  — ④ a compra não fica 'na prateleira', e a relação que faltava aparece —")
+caso("⛔ a frase da prateleira saiu do Radar",
+     any("na prateleira" in l for l in rad_x), False)
+# ✅ A relação que o produto já tinha e não usava: compra − saída = variação do estoque.
+compra_saida = [l for l in rad_x if "Compra × saída" in l]
+caso("a relação compra × saída é publicada", len(compra_saida), 1)
+caso("e ela diz a direção sem adjetivo",
+     "acima do que vendeu" in compra_saida[0] if compra_saida else False, True)
+caso("sem julgar se está certo ou errado",
+     any(p in compra_saida[0].lower() for p in ("demais", "excessiv", "errad", "inadequad"))
+     if compra_saida else True, False)
+
 print("\n" + "=" * 62)
 print(f"  {ok} passaram · {falhou} falharam")
 print("=" * 62)
