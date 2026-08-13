@@ -60,6 +60,17 @@ APP_TOKEN = os.environ.get("APP_TOKEN", "")
 # diária que o cliente pagante usa, e ninguém deve poder ligá-lo sem querer.
 LAB_TOKEN = os.environ.get("LAB_TOKEN", "")
 
+# 🔭 SHADOW MODE do mecanismo decisório (#095). A espinha determinística fica LIGADA
+# — custa zero token e responde relações, abstinências, limites e recall. A fase do
+# MODELO nasce DESLIGADA porque consome a mesma cota diária do cliente pagante:
+# `SHADOW_REDACAO=1` liga, `SHADOW_AMOSTRA` limita a fração das análises.
+SHADOW_MOTOR   = os.environ.get("SHADOW_MOTOR", "1") != "0"
+SHADOW_REDACAO = os.environ.get("SHADOW_REDACAO", "") == "1"
+try:
+    SHADOW_AMOSTRA = float(os.environ.get("SHADOW_AMOSTRA", "0.25"))
+except ValueError:
+    SHADOW_AMOSTRA = 0.25
+
 # Modelo da análise. O app nunca manda este campo — existe para comparar modelos
 # com os MESMOS dados antes de trocar o padrão, em vez de decidir por benchmark
 # de terceiro. Allowlist: request não escolhe modelo caro fora desta lista.
@@ -2240,6 +2251,48 @@ def gerar_analise(dados, segmento, modelo=None):
     print(f"PUBLICACAO|{segmento}|fallback-parcial|secoes-apuradas={len(apuradas) - 1}")
     return _texto_de_secoes(apuradas), apuradas
 
+def _observar_em_shadow(segmento, brutos, analise):
+    """🔭 O mecanismo decisório novo observa a análise real e REGISTRA. Só isso.
+
+    O empresário continua recebendo exatamente o produto atual; o mecanismo novo vê
+    o mesmo caso e anota o que TERIA feito. É o que o laboratório não consegue
+    fabricar: texto de lojista de verdade, combinações inesperadas, campos vazios,
+    erros de digitação naturais, freios reais, tamanho real de uma análise.
+
+    ⛔ ESTA FUNÇÃO NÃO PODE FALHAR PARA FORA. Ela roda dentro da rota que atende
+    cliente pagante; qualquer exceção morre aqui e vira uma linha de log.
+
+    💸 A fase do MODELO gasta a mesma cota diária do cliente. Por isso ela nasce
+    DESLIGADA (`SHADOW_REDACAO=1` liga) e é amostrada (`SHADOW_AMOSTRA=0.25` roda em
+    um quarto das análises). A espinha determinística — Fiscal 0, relações, estados,
+    limites, recall — custa ZERO token e responde a maior parte das perguntas.
+    """
+    if not SHADOW_MOTOR:
+        return
+    try:
+        sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                        "lab_prototipo"))
+        from shadow import detalhe, observar, resumo
+
+        chamar = None
+        if SHADOW_REDACAO and groq_client is not None and random.random() < SHADOW_AMOSTRA:
+            def chamar(prompt):
+                r = groq_client.chat.completions.create(
+                    model=MODELO_PADRAO,
+                    messages=[{"role": "user", "content": prompt}],
+                    temperature=0.3)
+                return r.choices[0].message.content
+
+        reg = observar(segmento, brutos, analise, chamar=chamar,
+                       preocupacao=(brutos.get("preocupacao") or "").strip().lower())
+        print(resumo(reg), flush=True)
+        for linha in detalhe(reg):
+            print(linha, flush=True)
+    except Exception as e:                              # noqa: BLE001
+        # Falha do shadow NUNCA é falha da análise. O cliente não fica sabendo.
+        print("SHADOW|erro-interno|%s: %s" % (type(e).__name__, e), flush=True)
+
+
 @app.route("/analisar", methods=["POST"])
 def analisar():
     try:
@@ -2289,6 +2342,12 @@ def analisar():
                 return jsonify({"status": "erro", "motivo": "Licença inválida ou expirada."}), 403
 
         analise, secoes = gerar_analise(dados, segmento, body.get("modelo"))
+
+        # 🔭 SHADOW MODE (#095) — o mecanismo novo observa a MESMA análise e não a
+        # toca. Vem DEPOIS da resposta estar pronta, dentro do seu próprio try, e
+        # nada aqui pode alterar `analise`, `secoes` ou o código de retorno.
+        _observar_em_shadow(segmento, brutos_atual, analise)
+
         # `analise` é o contrato da 1.0.2.0 que já está instalada — ACRESCENTA-SE
         # `secoes`, nunca se troca o formato, senão todo cliente instalado quebra.
         return jsonify({"status": "ok", "analise": analise, "secoes": secoes}), 200

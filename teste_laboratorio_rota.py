@@ -129,7 +129,44 @@ cliente.post("/laboratorio", json={"modelo": "openai/gpt-oss-20b"},
              headers={"X-Lab-Token": "segredo-de-teste"})
 checa("modelo da allowlist é respeitado", falso.modelo == "openai/gpt-oss-20b")
 
-print("\n⑥ A ROTA DE PRODUÇÃO CONTINUA INTOCADA")
+print("\n⑥ O SHADOW NÃO PODE TOCAR A /analisar")
+# 🔭 A trava mais importante do #095: o shadow roda DENTRO da rota que atende
+# cliente pagante, sobre os dados reais dele. Se ele explodir, o lojista não pode
+# ficar sabendo — e o relatório não pode mudar uma vírgula.
+servidor.SHADOW_MOTOR = True
+servidor.SHADOW_REDACAO = False
+antes = cliente.post("/analisar", json={}).status_code
+
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                "lab_prototipo"))
+import shadow as _sh  # noqa: E402
+
+_original = _sh.observar
+try:
+    def _explodir(*a, **k):
+        raise RuntimeError("shadow quebrou de propósito")
+
+    _sh.observar = _explodir
+    servidor._observar_em_shadow("Loja / Varejo e Moda", {"lucro": "8000"}, "relatório")
+    checa("shadow explodindo NÃO levanta exceção para a rota", True)
+except Exception as e:                                   # noqa: BLE001
+    checa("shadow explodindo NÃO levanta exceção para a rota", False, e)
+finally:
+    _sh.observar = _original
+
+checa("/analisar responde igual antes e depois",
+      cliente.post("/analisar", json={}).status_code == antes)
+
+servidor.SHADOW_MOTOR = False
+checa("SHADOW_MOTOR=0 desliga por completo",
+      servidor._observar_em_shadow("Loja / Varejo e Moda", {}, "") is None)
+servidor.SHADOW_MOTOR = True
+
+# 💸 A cota é a mesma do cliente pagante: a fase do modelo nasce desligada.
+checa("a fase do MODELO nasce DESLIGADA", servidor.SHADOW_REDACAO is False,
+      "→ a espinha determinística custa zero token")
+
+print("\n⑦ A ROTA DE PRODUÇÃO CONTINUA INTOCADA")
 r = cliente.get("/")
 checa("home responde", r.status_code == 200)
 checa("/analisar segue exigindo o seu próprio caminho",
