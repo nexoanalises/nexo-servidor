@@ -160,6 +160,57 @@ caso("a proibição está escrita no prompt",
      "ficaram FORA da leitura" in S.montar_prompt(INCOERENTE, "Celular e Acessórios")
      if hasattr(S, "montar_prompt") else True, True)
 
+print("\n=== 8. ENCALHE NÃO PODE VIRAR RUPTURA — a troca que inverte a decisão ===")
+# 🔴 Análise real de 13/08 ("Celular Legal"). O lojista declarou:
+#     encalhe_item: Motorola G17     (item PARADO, baixa saída)
+# E o relatório escreveu:
+#     "A baixa do Motorola G17 também sugere que há risco de perda de vendas
+#      se não houver estoque adequado."
+#
+# Encalhe pede LIQUIDAR. Ruptura pede REPOR. São decisões opostas — o produto
+# recomendou a errada sobre o item certo.
+#
+# ⚠️ A causa provável foi o NOME da chave: nasceu como `baixa_ocorreu` no Commit C do
+# #097, e "baixa" em português é ambíguo (dar baixa · queda · pouco). As chaves viajam
+# CRUAS no bloco de dados que o modelo lê. Renomeadas para `encalhe_*` — e a janela
+# estava aberta, porque nenhum cliente instalado mandava essas chaves.
+DECLARADO = ("faturamento: 60.000\ncustos: 45.000\nlucro: 15.000\n"
+             "encalhe_ocorreu: Sim\nencalhe_categoria: Aparelho\n"
+             "encalhe_item: Motorola G17\n"
+             "falta_ocorreu: Sim\nfalta_categoria: Acessório\n"
+             "falta_item: Capa do Xiaomi 15T PRO\n")
+ind_d, rad_d = S.calcular_motor(DECLARADO)
+
+
+def encalhe_viol(txt, dados=DECLARADO):
+    return bool([x for x in S.validar_saida(txt, dados, ind_d, rad_d)
+                 if "encalhe" in x["regra"]])
+
+
+# A frase REAL que saiu em produção.
+caso("a frase real de 13/08 é REPROVADA",
+     encalhe_viol("4. ALERTAS\nA baixa do Motorola G17 também sugere que há risco de "
+                  "perda de vendas se não houver estoque adequado.\n"), True)
+caso("'precisa repor o Motorola G17' é reprovado",
+     encalhe_viol("Precisa repor o Motorola G17 com urgência."), True)
+caso("'o Motorola G17 pode faltar' é reprovado",
+     encalhe_viol("O Motorola G17 pode faltar no próximo mês."), True)
+
+# A leitura CORRETA do mesmo item passa — a trava não pode calar o que é verdadeiro.
+caso("a leitura correta do encalhe passa",
+     encalhe_viol("O Motorola G17 está parado há cerca de 3 meses e perde valor."), False)
+caso("liquidar o item parado passa",
+     encalhe_viol("Criar ação de giro para o Motorola G17, parado no estoque."), False)
+
+# E o item que REALMENTE faltou continua podendo ser tratado como falta.
+caso("o item em FALTA pode ser tratado como falta",
+     encalhe_viol("A falta da Capa do Xiaomi 15T PRO cria risco de perda de vendas."),
+     False)
+
+# Sem encalhe declarado, a checagem não inventa alvo.
+caso("sem encalhe declarado, nada dispara",
+     encalhe_viol("Precisa repor o Motorola G17.", "faturamento: 60.000\n"), False)
+
 print("\n" + "=" * 62)
 print(f"  {ok} passaram · {falhou} falharam")
 print("=" * 62)

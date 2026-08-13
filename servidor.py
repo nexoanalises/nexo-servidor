@@ -1693,6 +1693,29 @@ def validar_saida(saida, dados, indicadores, radar):
                                "então margem e lucro ficaram fora da leitura — nenhuma "
                                "seção pode julgá-los", linha))
 
+    # 0b · 🔴 ENCALHE LIDO COMO RUPTURA — a troca que INVERTE a decisão.
+    #
+    # Análise real de 13/08: o lojista declarou o Motorola G17 como item PARADO, e o
+    # relatório escreveu *"a baixa do Motorola G17 sugere risco de perda de vendas se
+    # não houver estoque adequado"*. Encalhe pede liquidar; ruptura pede repor. São
+    # decisões opostas, e o produto recomendou a errada sobre o item certo.
+    #
+    # ⚠️ A checagem é NOMINAL de propósito: só dispara quando o ITEM que o lojista
+    # declarou encalhado aparece na mesma frase que vocabulário de falta. Não julga
+    # o raciocínio — confere se um fato declarado foi invertido.
+    _item_encalhe = re.search(r"^\s*encalhe_item\s*:\s*(.+)$", dados or "", re.M | re.I)
+    if _item_encalhe:
+        alvo = _item_encalhe.group(1).strip()
+        if len(alvo) >= 3:
+            _RUPTURA = re.compile(r"faltar|falta d|em falta|ruptura|repor|reposi[çc]|"
+                                  r"sem estoque|estoque adequado|acabar o estoque", re.I)
+            for linha in (saida or "").split("\n"):
+                if alvo.lower() in linha.lower() and _RUPTURA.search(linha):
+                    v.append(_viol("encalhe tratado como falta",
+                                   f"'{alvo}' foi declarado como item PARADO/baixa saída; "
+                                   f"dizer que ele pode faltar ou precisa de reposição "
+                                   f"inverte a decisão", linha))
+
     # 1 · número sem fonte (a seção de METAS é alvo proposto, tratada abaixo)
     for linha in (saida or "").split("\n"):
         if re.match(r"^[^\w\d]*\d+\.\s", linha) or linha.strip() in metas:
@@ -2193,6 +2216,14 @@ def gerar_analise(dados, segmento, modelo=None):
                 f"invente número — 'criar uma ação de giro para o blazer e a saia longa nos próximos 30 dias, "
                 f"definindo o desconto depois de olhar a margem e o custo dessas peças'.\n"
                 f"EXCEÇÃO ÚNICA: percentual que já está escrito nos dados do cliente pode ser citado como está.\n\n"
+
+                f"🔴 ENCALHE E RUPTURA SÃO OPOSTOS — NÃO TROQUE UM PELO OUTRO:\n"
+                f"- ITEM ENCALHADO (encalhe_item, 'baixa saída', 'parado', 'sem giro'): há estoque DEMAIS. "
+                f"A decisão é girar, liquidar, parar de comprar. NUNCA escreva que ele pode faltar, que há "
+                f"risco de ruptura ou que é preciso repor.\n"
+                f"- ITEM EM FALTA (falta_item, 'faltou', 'ruptura'): há estoque DE MENOS. A decisão é repor e "
+                f"não deixar faltar de novo. NUNCA escreva que ele está parado ou encalhado.\n"
+                f"Trocar um pelo outro INVERTE a decisão e invalida a resposta.\n\n"
 
                 f"⚖️ AS DUAS ALAVANCAS DE PREÇO SÃO OPOSTAS — NUNCA NA MESMA FRASE:\n"
                 f"- LIQUIDAR o encalhado: sacrifica margem DE PROPÓSITO para recuperar CAIXA. Só vale para item parado.\n"
