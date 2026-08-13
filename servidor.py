@@ -1006,11 +1006,40 @@ def _lista_pt(itens):
     return itens[0] if len(itens) == 1 else ", ".join(itens[:-1]) + " e " + itens[-1]
 
 
-def _leitura_mista(avancaram, recuaram):
+# 🔴 O ESTADO É DO RESULTADO; A DECLARAÇÃO É DO LOJISTA. Eram duas coisas grudadas
+# nas seis frases acima — cada uma abre julgando o resultado ("o resultado veio") e
+# fecha aconselhando a execução ("termine o que ficou pela metade"). Enquanto o MISTO
+# só valia para quem executou tudo, as outras duas ramificações continuavam decidindo
+# se o resultado veio por UMA linha, `lucro >= lucro_ant` — a falha original, intacta
+# em dois terços do bloco. Com faturamento caindo 22% e custos melhorando, "Em parte"
+# ainda publicava "o resultado veio", e "Não executei" ainda publicava "o resultado
+# melhorou". Agora a oração de resultado vem da classificação e a de execução vem da
+# declaração, que é o que cada uma sempre significou.
+_ABERTURA_MISTA = {
+    "sim":     "Você executou as ações do ciclo anterior.",
+    "parcial": "Você executou em parte as ações do ciclo anterior.",
+    "nao":     "Você não executou as ações do ciclo anterior.",
+}
+_FECHO_MISTO = {
+    "sim":     "Com os dados disponíveis, o NEXO não atribui essas variações às ações "
+               "executadas.",
+    # O conselho do "em parte" NÃO depende da direção do resultado — o que ficou pela
+    # metade continua por testar tanto no ciclo bom quanto no ruim. Ele sobrevive.
+    "parcial": "Com os dados disponíveis, o NEXO não atribui essas variações ao que foi "
+               "executado. Vale terminar o que ficou pela metade antes de concluir "
+               "sobre a recomendação.",
+    "nao":     "Com os dados disponíveis, o NEXO não atribui essas variações à "
+               "recomendação: ela não chegou a ser testada e continua de pé.",
+}
+
+
+def _leitura_mista(avancaram, recuaram, chave="sim"):
     """A frase do resultado MISTO — observa, compara e PRESERVA CAUSALIDADE.
 
     A última oração não é cortesia: sem ela, listar o que subiu logo depois de dizer
     "você executou" ATRIBUI o movimento às ações. O NEXO comparou; não mediu causa.
+    E ela muda com a declaração: para quem NÃO executou, "não atribui às ações
+    executadas" seria absurdo — não houve ação a que atribuir.
 
     ⚠️ E o verbo segue o MOVIMENTO, não a avaliação: custo e estoque que pioraram
     SUBIRAM, não recuaram. Dizer "os custos recuaram" quando eles subiram inverteria
@@ -1022,10 +1051,9 @@ def _leitura_mista(avancaram, recuaram):
         f"{_lista_pt(caiu)} {'recuou' if len(caiu) == 1 else 'recuaram'}" if caiu else "",
         f"{_lista_pt(subiu)} {'subiu' if len(subiu) == 1 else 'subiram'}" if subiu else "",
     ) if p)
-    return ("Você executou as ações do ciclo anterior. Os resultados foram MISTOS: "
+    return (f"{_ABERTURA_MISTA[chave]} Os resultados foram MISTOS: "
             f"{_lista_pt(avancaram)} avançaram, enquanto {piorou}. "
-            "Com os dados disponíveis, o NEXO não atribui essas variações às ações "
-            "executadas.")
+            f"{_FECHO_MISTO[chave]}")
 
 
 def _classificar_ciclo(a, ant):
@@ -1096,10 +1124,11 @@ def _bloco_ciclo(dados, indicadores=()):
         linhas.append(f"O que mudou por sua conta: {mudou}")
 
     # 🔴 O resultado MISTO tem leitura própria e vem ANTES da tabela binária: quatro
-    # medidas avançando e uma caindo não é "o resultado não veio".
+    # medidas avançando e uma caindo não é "o resultado não veio". Vale nas TRÊS
+    # declarações — o estado é do resultado, não de quem o declarou.
     avancaram, recuaram = _classificar_ciclo(a, ant)
-    if chave == "sim" and avancaram and recuaram:
-        linhas.append(_leitura_mista(avancaram, recuaram))
+    if chave and avancaram and recuaram:
+        linhas.append(_leitura_mista(avancaram, recuaram, chave))
     elif chave and melhorou is not None:
         linhas.append(_LEITURA_CICLO[(chave, melhorou)])
     else:

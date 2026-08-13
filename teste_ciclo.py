@@ -73,15 +73,31 @@ print("\n=== as leituras ===")
 #
 # ⚠️ Os dois são a MESMA falha, e a regra congelada pelo fundador — "resultado misto
 # não pode virar resultado que não veio" — não tem lado: vale igual para o elogio.
+#
+# 🔴 E NÃO TEM DECLARAÇÃO TAMPOUCO. O estado é do RESULTADO; quem declarou a execução
+# foi o lojista. Enquanto o MISTO valia só para "Sim, todas", as outras duas
+# ramificações continuavam decidindo por `lucro >= lucro_ant` — a falha original,
+# intacta em dois terços do bloco. Neste payload as SEIS combinações são mistas
+# (faturamento −22% contra custos melhorando), então o lucro nunca decidiu nada aqui.
+#
+# A asserção agora cobra as DUAS orações: o estado, que vem dos números, e a oração
+# de execução, que vem da declaração e não pode sumir junto.
 for executou, lucro, trecho in [
-        ("Sim, todas",   "15.000", "Os resultados foram MISTOS"),
-        ("Sim, todas",   "7.900",  "Os resultados foram MISTOS"),
-        ("Não executei", "15.000", "Vale descobrir o que puxou"),
-        ("Não executei", "7.900",  "não chegou a ser testada"),
+        ("Sim, todas",   "15.000", "não atribui essas variações às ações executadas"),
+        ("Sim, todas",   "7.900",  "não atribui essas variações às ações executadas"),
+        ("Não executei", "15.000", "não chegou a ser testada e continua de pé"),
+        ("Não executei", "7.900",  "não chegou a ser testada e continua de pé"),
         ("Em parte",     "15.000", "terminar o que ficou pela metade"),
-        ("Em parte",     "7.900",  "o que faltou executar era justamente")]:
+        ("Em parte",     "7.900",  "terminar o que ficou pela metade")]:
     b = "\n".join(S._bloco_ciclo(payload(executou, lucro=lucro)))
-    caso(f"{executou:12} + lucro {lucro}", trecho in b, True)
+    caso(f"{executou:12} + lucro {lucro} → misto", "Os resultados foram MISTOS" in b, True)
+    caso(f"{executou:12} + lucro {lucro} → oração da declaração", trecho in b, True)
+
+# ⛔ E o que o MISTO não pode fazer: dizer a quem NÃO executou que o NEXO não atribui
+# o resultado "às ações executadas" — não houve ação a que atribuir.
+b = "\n".join(S._bloco_ciclo(payload("Não executei", lucro="15.000")))
+caso("não fala em 'ações executadas' para quem não executou",
+     "às ações executadas" in b, False)
 
 print("\n=== 🔴 o par que hoje recebe o MESMO conselho ===")
 b_falhou = "\n".join(S._bloco_ciclo(payload("Sim, todas", lucro="7.900")))
