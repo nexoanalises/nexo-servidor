@@ -711,6 +711,28 @@ def _fmt_rs(v):
     s = _fmt_br(v, 2)
     return s[:-3] if s.endswith(",00") else s
 
+def _lucro_incoerente(fat, custos, lucro):
+    """O lucro informado não fecha com faturamento − custos?
+
+    🔴 O DEFEITO QUE ESTA FUNÇÃO EXISTE PARA MATAR, achado em análise real (13/08):
+    o Radar dizia, na mesma tela, *"Números não fecham: faturamento menos custos dá
+    R$ 20.000, mas o lucro informado é R$ 45.000"* — e logo acima **"Margem líquida:
+    75% (margem saudável)"**. Depois o §2 amplificava: *"o lucro de R$ 45.000 é um
+    ponto positivo, considerando a margem saudável"*.
+
+    ### O produto avisava que o número estava errado e concluía a partir dele.
+
+    Entrada incoerente precisa CONTAMINAR tudo que depende dela. Não basta avisar:
+    aviso ao lado de conclusão é conclusão, porque ninguém lê o rodapé antes de
+    acreditar no título.
+
+    ⚠️ A tolerância de 15% é a mesma que já existia no aviso — não é régua nova.
+    """
+    if not (fat and fat > 0 and custos is not None and lucro is not None):
+        return False
+    return abs((fat - custos) - lucro) > 0.15 * fat
+
+
 def _atuais(dados):
     """Números do período ATUAL, com a mesma leitura que o Motor usa. Existe para as
     seções escritas por código não dependerem de reparsear nada por conta própria."""
@@ -835,9 +857,15 @@ def _bloco_metas(dados):
     a = _atuais(dados)
     fat, meta, lucro = a.get("faturamento"), a.get("meta"), a.get("lucro")
     linhas = []
-    margem = (lucro / fat * 100) if (fat and fat > 0 and lucro is not None) else None
-    if margem is not None and not _pct_sao(margem):
+    # 🔴 A mesma invalidade do Radar: sem isto o §8 mandava "manter a margem em 75%"
+    # sobre uma margem que o próprio Radar tinha acabado de invalidar — e o alvo de
+    # lucro, que nasce dela, herdava o erro multiplicado.
+    if _lucro_incoerente(fat, a.get("custos"), lucro):
         margem = None
+    else:
+        margem = (lucro / fat * 100) if (fat and fat > 0 and lucro is not None) else None
+        if margem is not None and not _pct_sao(margem):
+            margem = None
 
     if fat and fat > 0:
         if meta and meta > fat:
@@ -1069,7 +1097,13 @@ def calcular_motor(dados):
                           and custos and custos > 0 and custos_ant and custos_ant > 0
                           and lucro is not None and lucro_ant is not None)
 
-    margem = lucro / fat * 100 if (fat and fat > 0 and lucro is not None) else None
+    # 🔑 A INVALIDADE SE PROPAGA CORTANDO NA RAIZ, não consumidor a consumidor.
+    # `margem = None` desliga de uma vez o indicador, o rótulo, a linha do Radar, a
+    # comparação com a análise anterior e o alvo do §8 — porque todos eles JÁ têm
+    # guarda para None. Policiar seis lugares deixaria o sétimo passar.
+    incoerente = _lucro_incoerente(fat, custos, lucro)
+    margem = None if incoerente else (
+        lucro / fat * 100 if (fat and fat > 0 and lucro is not None) else None)
     if margem is not None:
         indicadores.append(f"Margem líquida: {_fmt_br(margem)}% (lucro R$ {_fmt_br(lucro)} / faturamento R$ {_fmt_br(fat)})")
     ating = fat / meta * 100 if (fat and fat > 0 and meta and meta > 0) else None
@@ -1082,9 +1116,13 @@ def calcular_motor(dados):
     if conta_historia:
         d_fat = (fat - fat_ant) / fat_ant * 100
         d_cus = (custos - custos_ant) / custos_ant * 100
-        d_luc = (lucro - lucro_ant) / abs(lucro_ant) * 100 if lucro_ant else None
-        m_ant = lucro_ant / fat_ant * 100
-        if _pct_sao(d_fat, d_cus, margem, m_ant) and (d_luc is None or _pct_sao(d_luc)):
+        # 🔴 Só o que DEPENDE do lucro morre quando ele não fecha. Faturamento e
+        # custos continuam: eles não têm nada a ver com o número que não bateu, e
+        # apagá-los seria invalidar o que está por perto, não o que depende.
+        d_luc = (None if incoerente else
+                 ((lucro - lucro_ant) / abs(lucro_ant) * 100 if lucro_ant else None))
+        m_ant = None if incoerente else lucro_ant / fat_ant * 100
+        if _pct_sao(d_fat, d_cus) and (margem is None or _pct_sao(margem, m_ant))                 and (d_luc is None or _pct_sao(d_luc)):
             # 1. vendi quanto
             sinal = "+" if d_fat >= 0 else ""
             texto_meta = ""
@@ -1123,10 +1161,12 @@ def calcular_motor(dados):
             if d_luc is not None:
                 radar.append(f"{'🟢' if d_luc >= 0 else '🔴'} Lucro: R$ {_fmt_br(lucro_ant)} → R$ {_fmt_br(lucro)} "
                              f"({'+' if d_luc >= 0 else ''}{_fmt_br(d_luc)}%)")
-            # 4. sobra quanto de cada R$ 100 — a régua que o dono entende sem conta
-            band = "🟢" if margem >= m_ant else ("🔴" if (m_ant - margem >= 3 and margem < 10) else "🟡")
-            radar.append(f"{band} De cada R$ 100 vendidos sobravam R$ {_fmt_br(m_ant, 2)} e agora sobram "
-                         f"R$ {_fmt_br(margem, 2)} ({rotulo_margem})")
+            # 4. sobra quanto de cada R$ 100 — a régua que o dono entende sem conta.
+            # ⛔ Some quando o lucro não fecha: ela é margem pura.
+            if margem is not None and m_ant is not None:
+                band = "🟢" if margem >= m_ant else ("🔴" if (m_ant - margem >= 3 and margem < 10) else "🟡")
+                radar.append(f"{band} De cada R$ 100 vendidos sobravam R$ {_fmt_br(m_ant, 2)} e agora sobram "
+                             f"R$ {_fmt_br(margem, 2)} ({rotulo_margem})")
         else:
             conta_historia = False
 
@@ -1141,10 +1181,13 @@ def calcular_motor(dados):
         peso = custos / fat * 100
         indicadores.append(f"Custos sobre faturamento: {_fmt_br(peso)}%")
         if lucro is not None:
-            dif = (fat - custos) - lucro
-            if abs(dif) > 0.15 * fat:
-                radar.append(f"🟡 Números não fecham: faturamento menos custos dá R$ {_fmt_br(fat - custos)}, "
-                             f"mas o lucro informado é R$ {_fmt_br(lucro)} — vale conferir os lançamentos")
+            if _lucro_incoerente(fat, custos, lucro):
+                # Declara o LIMITE, não um "vale conferir" ao lado da conclusão: diz
+                # o que ficou de fora e por quê. O limite é do dado informado, e a
+                # frase nunca acusa o lojista de nada — ele pode ter errado de campo.
+                radar.append(f"🔴 Números não fecham: faturamento menos custos dá R$ {_fmt_br(fat - custos)}, "
+                             f"mas o lucro informado é R$ {_fmt_br(lucro)}. Margem e lucro ficaram "
+                             f"FORA desta leitura — confira os lançamentos e rode de novo")
     # Para onde o dinheiro foi: custo crescendo mais rápido que faturamento é a explicação
     # aritmética do "faturei mais e não sobrou". Calculado aqui, em Python, porque é a
     # informação que o dono procura — não pode depender de o modelo reparar nela.
@@ -1601,12 +1644,43 @@ def validar_entrada(atual, brutos):
                            f"informado é R$ {_fmt_br(lucro)}", bloqueia=False, campo="Lucro líquido"))
     return v
 
+# Julgamentos que ficam PROIBIDOS quando o lucro informado não fecha. Não é blacklist
+# de estilo: é a lista das formas de dizer "este número é bom/ruim" — e o número em
+# questão foi retirado da leitura por não fechar.
+_JULGA_MARGEM = re.compile(
+    r"margem\s+(saud[áa]vel|apertada|boa|ruim|alta|baixa|confort[áa]vel|positiva|"
+    r"negativa|forte|fraca|excelente|[óo]tima)", re.I)
+_JULGA_LUCRO = re.compile(
+    r"lucro[^.]{0,40}\b(significativ|positiv|expressiv|s[óo]lid|saud[áa]vel|"
+    r"confort[áa]vel|excelente|[óo]tim|bom\b|boa\b|ruim\b|baix|fraco|alto)", re.I)
+
+
 def validar_saida(saida, dados, indicadores, radar):
     """🟠 BLOQUEIO DE SAÍDA — os dados estavam certos e a IA produziu algo inválido."""
     v = []
     permitidos = _numeros_de(dados) | _numeros_de("\n".join(indicadores)) | _numeros_de("\n".join(radar))
     permitidos |= {str(n) for n in range(0, 101)}          # prazo, quantidade de item, %
     metas = set(_secao_da_saida(saida, "METAS"))
+
+    # 0 · 🔴 INVALIDADE PROPAGADA — a checagem que nasce do caso real de 13/08.
+    #
+    # Quando o Radar publica "Números não fecham", margem e lucro ficaram FORA da
+    # leitura. Instrução no prompt não bastou: o modelo escreveu "margem saudável" e
+    # "lucro significativo" numa análise em que o próprio Radar dizia que o lucro não
+    # fechava. Aqui a saída é REPROVADA e volta para o modelo.
+    #
+    # ⚠️ As linhas do Radar são puladas: elas são do CÓDIGO e entram na saída
+    # literalmente (M3). Sem pular, a própria linha do aviso se autoacusaria.
+    if any("Números não fecham" in l for l in (radar or [])):
+        linhas_radar = {l.strip() for l in (radar or [])}
+        for linha in (saida or "").split("\n"):
+            if linha.strip() in linhas_radar:
+                continue
+            if _JULGA_MARGEM.search(linha) or _JULGA_LUCRO.search(linha):
+                v.append(_viol("conclusão sobre número inválido",
+                               "o lucro informado não fecha com faturamento menos custos, "
+                               "então margem e lucro ficaram fora da leitura — nenhuma "
+                               "seção pode julgá-los", linha))
 
     # 1 · número sem fonte (a seção de METAS é alvo proposto, tratada abaixo)
     for linha in (saida or "").split("\n"):
@@ -2034,6 +2108,13 @@ def gerar_analise(dados, segmento, modelo=None):
                 f"'margem saudável', 'prejuízo'); não crie um julgamento paralelo que brigue com ele. "
                 f"Também não afirme que o lucro caiu, subiu ou ficou igual sem que os números calculados digam isso. "
                 f"Contradizer o Motor invalida a resposta.\n\n"
+
+                f"🔴 SE O RADAR TRAZ 'Números não fecham': o lucro informado NÃO fecha com faturamento menos "
+                f"custos, e por isso margem e lucro ficaram FORA da leitura. Nesse caso é PROIBIDO, em qualquer "
+                f"seção: chamar a margem de saudável, apertada ou de qualquer outra coisa; dizer que o lucro foi "
+                f"bom, positivo, significativo ou ruim; usar o valor do lucro como prova de conclusão; e construir "
+                f"diagnóstico sobre ele. Diga o que os OUTROS números sustentam e trate a correção dos lançamentos "
+                f"como o próximo passo. Aviso ao lado de conclusão é conclusão.\n\n"
 
                 f"📄 FORMATAÇÃO — a saída vai direto para um PDF que não interpreta markdown:\n"
                 f"- Escreva em TEXTO PURO. Proibido '**', '###', '---', '```', tabelas e qualquer marcação.\n"
