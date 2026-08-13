@@ -1655,6 +1655,54 @@ def validar_entrada(atual, brutos):
                            f"informado é R$ {_fmt_br(lucro)}", bloqueia=False, campo="Lucro líquido"))
     return v
 
+# ─────────────────────────────────────────────────────────────────────────────
+# 🔴 O QUE UM FATO DECLARADO AUTORIZA DIZER — e onde o produto extrapolou.
+#
+# Análise real de 13/08. Três frases saíram afirmando o que os dados NÃO sustentam:
+#
+#   "a compra de R$ 38.000 indica que o investimento em estoque pode não ter sido
+#    totalmente eficaz"        → compra ser 84,4% dos custos NÃO prova ineficiência
+#   "a falta de capa pode ter IMPACTADO as vendas"
+#                              → a falta comprova RUPTURA, não impacto consumado
+#   "a diminuição do fluxo pode ser sinal de mudança no comportamento"
+#                              → o NEXO sabe que caiu; não sabe POR QUÊ
+#
+# São a mesma família: FATO DECLARADO → CONSEQUÊNCIA OU CAUSA QUE ELE NÃO ESTABELECE.
+# É a causalidade que o mecanismo novo torna inexpressável — aqui ela ainda entra pela
+# linguagem, então a trava é nominal e determinística onde dá, e observação onde não dá.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Variação dos APURADOS. Sem análise anterior não existe "cresceu" nem "caiu": não há
+# de quê. ⚠️ Nominal nos campos que o Motor compara — o lojista pode declarar variação
+# dele ("o fluxo caiu 10%") e isso continua sendo fato dele.
+_APURADO_VARIA = re.compile(
+    r"\b(faturamento|custos?|lucro|margem|ticket m[ée]dio)\b[^.]{0,60}?"
+    r"\b(cresceu|caiu|subiu|aumentou|diminuiu|reduziu|melhorou|piorou|"
+    r"cresceram|caíram|subiram|aumentaram|diminuíram|reduziram)\b|"
+    r"\b(cresceu|caiu|subiu|aumentou|diminuiu|reduziu|"
+    r"cresceram|caíram|subiram|aumentaram|diminuíram)\b[^.]{0,40}?"
+    r"\b(faturamento|custos?|lucro|margem|ticket m[ée]dio)\b", re.I)
+
+# Impacto CONSUMADO atribuído à falta. Ruptura autoriza RISCO, nunca efeito medido.
+_FALTA_IMPACTO = re.compile(
+    r"\b(falta|faltou|ruptura|em falta)\b[^.]{0,80}?"
+    r"\b(impact\w+|reduz\w+|derrub\w+|prejudic\w+|diminu\w+|fez perder|"
+    r"custou|comeu|tirou)\b", re.I)
+
+# Juízo sobre a QUALIDADE da compra. Nenhum campo mede se a compra foi acertada.
+_COMPRA_JULGADA = re.compile(
+    r"\b(compra|aquisi[çc][ãa]o|investimento em estoque)\b[^.]{0,80}?"
+    r"\b(efica[zc]|ineficaz|ineficiente|acertad\w+|errad\w+|equivocad\w+|"
+    r"mal (feita|dimensionada)|desnecess[áa]ri\w+|excessiv\w+)\b|"
+    r"\b(efica[zc]|ineficaz|ineficiente)\b[^.]{0,60}?\b(compra|estoque)\b", re.I)
+
+# Intensidade que ninguém apurou. ⚠️ ESTREIA OBSERVANDO — aqui há julgamento de grau,
+# e a convenção do `_viol` vale: mede-se a taxa antes de promover.
+_INTENSIDADE = re.compile(
+    r"\b(significativ\w+|expressiv\w+|consider[áa]v\w+|substancial\w*|"
+    r"drasticamente|fortemente|enormemente)\b", re.I)
+
+
 # Julgamentos que ficam PROIBIDOS quando o lucro informado não fecha. Não é blacklist
 # de estilo: é a lista das formas de dizer "este número é bom/ruim" — e o número em
 # questão foi retirado da leitura por não fechar.
@@ -1715,6 +1763,59 @@ def validar_saida(saida, dados, indicadores, radar):
                                    f"'{alvo}' foi declarado como item PARADO/baixa saída; "
                                    f"dizer que ele pode faltar ou precisa de reposição "
                                    f"inverte a decisão", linha))
+
+    # 0c · 🔴 VARIAÇÃO SEM PERÍODO ANTERIOR — conclusão sem origem, sem cifra.
+    #
+    # Análise real de 13/08, PRIMEIRA do negócio: *"O faturamento cresceu, mas os
+    # custos também subiram"*. Não havia com o que comparar. Nenhum número foi
+    # inventado — por isso a checagem 1 não pegou — mas a AFIRMAÇÃO de variação foi.
+    #
+    # ⚠️ Nominal nos apurados: o lojista pode declarar variação dele ("o fluxo caiu
+    # 10%") e isso continua sendo fato dele, não invenção do produto.
+    if "=== ANÁLISE ANTERIOR" not in (dados or ""):
+        for linha in (saida or "").split("\n"):
+            if linha.strip() in {l.strip() for l in (radar or [])}:
+                continue
+            if _APURADO_VARIA.search(linha):
+                v.append(_viol("variação sem período anterior",
+                               "esta é a primeira análise do negócio — não há com o que "
+                               "comparar, então nada cresceu, caiu ou subiu", linha))
+
+    # 0d · 🔴 FALTA VIRANDO IMPACTO CONSUMADO.
+    # *"A falta de capa pode ter IMPACTADO as vendas"* — a falta comprova RUPTURA.
+    # Não comprova que venda alguma deixou de acontecer: ninguém mediu isso.
+    # ✅ O permitido é RISCO: "a falta da capa cria risco de perda de vendas".
+    for linha in (saida or "").split("\n"):
+        if linha.strip() in {l.strip() for l in (radar or [])}:
+            continue
+        if _FALTA_IMPACTO.search(linha) and not re.search(r"\brisco\b", linha, re.I):
+            v.append(_viol("falta tratada como impacto medido",
+                           "a ruptura comprova que faltou, não que a venda caiu por "
+                           "causa dela — o permitido é falar em RISCO", linha))
+
+    # 0e · 🔴 JUÍZO SOBRE A QUALIDADE DA COMPRA.
+    # *"a compra de R$ 38.000 indica que o investimento em estoque pode não ter sido
+    # totalmente eficaz"* — compra ser 84,4% dos custos é COMPOSIÇÃO, não veredito.
+    # Nenhum campo do formulário mede se a compra foi acertada.
+    for linha in (saida or "").split("\n"):
+        if linha.strip() in {l.strip() for l in (radar or [])}:
+            continue
+        if _COMPRA_JULGADA.search(linha):
+            v.append(_viol("juízo sobre a compra sem dado que o sustente",
+                           "a composição do custo diz QUANTO foi comprado, não se a "
+                           "compra foi acertada — nenhum campo mede isso", linha))
+
+    # 0f · 🟡 INTENSIDADE NÃO APURADA — *"impactaram SIGNIFICATIVAMENTE o lucro"*.
+    # ⚠️ ESTREIA OBSERVANDO, e de propósito: aqui há julgamento de grau, e a convenção
+    # do `_viol` vale integralmente. A exceção do #099 não alcança este caso — ele não
+    # é determinístico. Mede-se a taxa de disparo antes de promover.
+    for linha in (saida or "").split("\n"):
+        if linha.strip() in {l.strip() for l in (radar or [])}:
+            continue
+        if _INTENSIDADE.search(linha):
+            v.append(_viol("intensidade não apurada",
+                           "grau ('significativo', 'expressivo') não sai de nenhum "
+                           "número calculado", linha, observa=True))
 
     # 1 · número sem fonte (a seção de METAS é alvo proposto, tratada abaixo)
     for linha in (saida or "").split("\n"):
@@ -2216,6 +2317,21 @@ def gerar_analise(dados, segmento, modelo=None):
                 f"invente número — 'criar uma ação de giro para o blazer e a saia longa nos próximos 30 dias, "
                 f"definindo o desconto depois de olhar a margem e o custo dessas peças'.\n"
                 f"EXCEÇÃO ÚNICA: percentual que já está escrito nos dados do cliente pode ser citado como está.\n\n"
+
+                f"🔴 O QUE UM FATO DECLARADO AUTORIZA DIZER — e onde ele PARA:\n"
+                f"- FALTA declarada prova que faltou. NÃO prova que alguma venda deixou de acontecer: "
+                f"ninguém mediu isso. Escreva 'cria RISCO de perda de vendas', nunca 'impactou', "
+                f"'reduziu' ou 'fez perder' vendas.\n"
+                f"- COMPOSIÇÃO DE CUSTO diz QUANTO foi comprado e que fatia isso representa. NÃO diz se a "
+                f"compra foi acertada. É PROIBIDO chamar a compra de eficaz, ineficaz, errada, excessiva ou "
+                f"desnecessária — nenhum campo mede isso.\n"
+                f"- QUEDA DECLARADA pelo cliente (fluxo, clientes, vendas) é fato dele e pode ser citada. "
+                f"O motivo NÃO é: não escreva que ela 'sinaliza', 'indica' ou 'sugere' mudança de "
+                f"comportamento, de mercado ou de concorrência. O NEXO sabe QUE caiu, não POR QUÊ.\n"
+                f"- SEM ANÁLISE ANTERIOR nada cresceu, caiu ou subiu. Se este for o primeiro período do "
+                f"negócio, é PROIBIDO afirmar variação de faturamento, custo, lucro, margem ou ticket.\n"
+                f"- GRAU não sai de número: 'significativo', 'expressivo', 'considerável' e 'drasticamente' "
+                f"acrescentam intensidade que nenhum cálculo produziu.\n\n"
 
                 f"🔴 ENCALHE E RUPTURA SÃO OPOSTOS — NÃO TROQUE UM PELO OUTRO:\n"
                 f"- ITEM ENCALHADO (encalhe_item, 'baixa saída', 'parado', 'sem giro'): há estoque DEMAIS. "

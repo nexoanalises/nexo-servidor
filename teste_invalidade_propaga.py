@@ -211,6 +211,63 @@ caso("o item em FALTA pode ser tratado como falta",
 caso("sem encalhe declarado, nada dispara",
      encalhe_viol("Precisa repor o Motorola G17.", "faturamento: 60.000\n"), False)
 
+print("\n=== 9. FATO DECLARADO NÃO AUTORIZA CONSEQUÊNCIA NEM CAUSA ===")
+# 🔴 As três frases restantes da análise real de 13/08. São a mesma família:
+# um FATO DECLARADO virando CONSEQUÊNCIA ou CAUSA que ele não estabelece — a
+# causalidade que o mecanismo novo torna inexpressável e que aqui ainda entrava
+# pela linguagem.
+SEM_ANT = ("faturamento: 60.000\ncustos: 45.000\nlucro: 15.000\n"
+           "falta_ocorreu: Sim\nfalta_item: Capa do Xiaomi 15T PRO\n")
+COM_ANT = ("=== ANÁLISE ANTERIOR 1 ===\nDADOS DAQUELA ANÁLISE:\n"
+           "faturamento: 50.000\ncustos: 40.000\nlucro: 10.000\n"
+           "\n=== DADOS ATUAIS ===\n" + SEM_ANT)
+ind_s, rad_s = S.calcular_motor(SEM_ANT)
+ind_c2, rad_c2 = S.calcular_motor(COM_ANT)
+
+
+def regras(txt, dados=SEM_ANT, ind=None, rad=None):
+    return {x["regra"] for x in S.validar_saida(txt, dados,
+                                                ind if ind is not None else ind_s,
+                                                rad if rad is not None else rad_s)}
+
+
+print("  — as frases REAIS que saíram em produção —")
+caso("'a compra pode não ter sido eficaz' é REPROVADO",
+     "juízo sobre a compra sem dado que o sustente" in regras(
+         "A compra de mercadoria, que representa 84,4% dos custos, indica que o "
+         "investimento em estoque pode não ter sido totalmente eficaz."), True)
+caso("'a falta pode ter IMPACTADO as vendas' é REPROVADO",
+     "falta tratada como impacto medido" in regras(
+         "A falta de capa do Celular Xiaomi 15T PRO também pode ter impactado as vendas."),
+     True)
+caso("'o faturamento cresceu' na PRIMEIRA análise é REPROVADO",
+     "variação sem período anterior" in regras(
+         "O faturamento cresceu, mas os custos também subiram."), True)
+caso("'impactaram SIGNIFICATIVAMENTE' é registrado",
+     "intensidade não apurada" in regras(
+         "Os custos impactaram significativamente o lucro."), True)
+# ⚠️ A intensidade estreia OBSERVANDO: há julgamento de grau, e a exceção do #099 não
+# a alcança — ela não é determinística. Mede-se a taxa antes de promover.
+caso("e a intensidade NÃO devolve a análise ao modelo",
+     [x["observa"] for x in S.validar_saida("Os custos impactaram significativamente o "
+                                            "lucro.", SEM_ANT, ind_s, rad_s)
+      if x["regra"] == "intensidade não apurada"], [True])
+
+print("  — e as leituras PERMITIDAS continuam passando —")
+caso("falar em RISCO de perda é permitido",
+     "falta tratada como impacto medido" in regras(
+         "A falta da capa do Xiaomi 15T PRO cria risco de perda de vendas."), False)
+caso("dizer QUANTO foi comprado é permitido",
+     "juízo sobre a compra sem dado que o sustente" in regras(
+         "A compra de mercadoria foi 84,4% dos custos."), False)
+caso("a queda que o LOJISTA declarou pode ser citada",
+     "variação sem período anterior" in regras(
+         "O fluxo de clientes na loja física diminuiu cerca de 10%."), False)
+caso("com período anterior, variação é permitida",
+     "variação sem período anterior" in regras(
+         "O faturamento cresceu em relação ao período anterior.",
+         COM_ANT, ind_c2, rad_c2), False)
+
 print("\n" + "=" * 62)
 print(f"  {ok} passaram · {falhou} falharam")
 print("=" * 62)
