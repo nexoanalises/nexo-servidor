@@ -38,6 +38,53 @@ EVENTOS_FREIO = {
     "promocao": "você declarou uma promoção",
 }
 
+# ─── A MARGEM DECLARADA EM TEXTO — o que o formulário REALMENTE coleta ───────
+#
+# 🔴 O shadow encontrou a divergência: o par do Celular tinha sido desenhado sobre
+# `margem_acessorios` em percentual, e o produto nunca perguntou isso. O formulário
+# pergunta `margem_categoria` em TEXTO LIVRE:
+#
+#     "acessórios deixam boa margem; aparelho novo quase não deixa"
+#
+# O mapa original já apontava para a relação HETEROGÊNEA — texto ↔ texto, mediada por
+# pertencimento. O protótipo tinha facilitado o caso; o alinhamento devolve a relação
+# que sempre quisemos testar.
+#
+# ⛔ E o limite continua: NÃO quantifica a perda, NÃO calcula margem, NÃO diz quanto
+# comprar. A conclusão é de pertencimento, e só.
+
+# Termo que nomeia uma CATEGORIA no texto do lojista.
+CATEGORIAS = {
+    "acessorio": "acessorio", "acessorios": "acessorio",
+    "capa": "acessorio", "capas": "acessorio", "pelicula": "acessorio",
+    "aparelho": "aparelho", "aparelhos": "aparelho", "celular": "aparelho",
+    "celulares": "aparelho", "smartphone": "aparelho",
+    "conserto": "servico", "consertos": "servico", "assistencia": "servico",
+    "servico": "servico", "servicos": "servico",
+}
+
+# Qualificador de margem — DECLARAÇÃO do lojista, nunca apuração do NEXO.
+# ⚠️ Por isso a redação é obrigada a manter a atribuição: "que VOCÊ DECLAROU ter boa
+# margem". Sem ela, a opinião dele vira fato apurado pelo produto.
+QUALIFICADORES_MARGEM = {
+    "deixam boa margem": "margem_alta", "deixa boa margem": "margem_alta",
+    "boa margem": "margem_alta", "deixam margem": "margem_alta",
+    "deixa margem": "margem_alta", "margem alta": "margem_alta",
+    "quase nao deixa": "margem_baixa", "nao deixa margem": "margem_baixa",
+    "pouca margem": "margem_baixa", "margem baixa": "margem_baixa",
+    "margem apertada": "margem_baixa",
+}
+
+# Como a categoria se escreve para o lojista. Vocabulário declarado, como tudo.
+NOME_CATEGORIA = {
+    "acessorio": "acessórios", "aparelho": "aparelhos", "servico": "serviços",
+}
+
+FRASE_DA_MARGEM = {
+    "margem_alta": "que você declarou ter boa margem",
+    "margem_baixa": "que você declarou ter margem baixa",
+}
+
 # Declarações de falta. O Fiscal 0 só extrai FATO DE FALTA + ITEM; nunca extrai motivo,
 # culpa ou consequência — isso seria significado econômico, e significado econômico é
 # do Motor, não do Fiscal 0 (#093 §2, os três níveis de normalização).
@@ -54,7 +101,7 @@ NATUREZA = {
     "acoes_quais":                {"tipo": "texto_livre", "unidade": None, "temporal": "periodo"},
     "confiabilidade_fornecedor":  {"tipo": "percentual", "unidade": "pct", "temporal": "serie"},
     "falta_declarada":            {"tipo": "texto_livre", "unidade": None, "temporal": "periodo"},
-    "margem_acessorios":          {"tipo": "percentual", "unidade": "pct", "temporal": "periodo"},
+    "margem_categoria":           {"tipo": "texto_livre", "unidade": None, "temporal": "periodo"},
     "capacidade":                 {"tipo": "percentual", "unidade": "pct", "temporal": "periodo"},
     "perdas_validade":            {"tipo": "monetario", "unidade": "BRL", "temporal": "prazo"},
 }
@@ -134,16 +181,17 @@ PARES = {
          "toca": {"fornecimento"}},
     ],
     "celular": [
-        {"par": ("falta_declarada", "margem_acessorios"),
+        {"par": ("falta_declarada", "margem_categoria"),
          "elo": "nomeia_classifica",
          "classe": "ruptura_por_categoria",
          "operacao": "pertencimento",
          # A ruptura por categoria fala de margem: quando ela se forma, a decisão de
          # margem entra em avaliação — e é isso que dá voz à evidência.
          "toca": {"margem", "ruptura"},
-         # 🆕 v0.2 etapa 3: o elo precisa ser DECLARADO **e** SATISFEITO. Aqui só se
-         # satisfaz se a etapa 0 tiver produzido o vínculo item ∈ categoria.
-         "exige_vinculo": ("falta_declarada", "acessorio")},
+         # 🆕 v0.2 etapa 3: o elo precisa ser DECLARADO **e** SATISFEITO. Aqui a
+         # satisfação é o encontro de DUAS extrações de texto: a categoria do item
+         # que faltou precisa ser uma das categorias que o lojista qualificou.
+         "exige_categoria_comum": ("falta_declarada", "margem_categoria")},
 
         {"par": ("margem_venda_aparelho", "margem_assistencia"),
          "elo": "mesma_grandeza_angulos",
@@ -262,7 +310,7 @@ ROTULO_PUBLICO = {
     "acoes_quais":               "Ações declaradas",
     "confiabilidade_fornecedor": "Confiabilidade dos fornecedores",
     "falta_declarada":           "Falta declarada",
-    "margem_acessorios":         "Margem de acessórios",
+    "margem_categoria":          "Margem declarada por categoria",
     "capacidade":                "Capacidade",
     "perdas_validade":           "Perdas por validade",
     "margem_venda_aparelho":     "Margem na venda de aparelhos",
@@ -299,7 +347,8 @@ ROTULOS = {
     "acoes_quais":               ("ação", "ações"),
     "confiabilidade_fornecedor": ("confiabilidade", "fornecedor", "fornecedores"),
     "falta_declarada":           ("falta", "faltou"),
-    "margem_acessorios":         ("margem", "acessório", "acessórios", "categoria"),
+    "margem_categoria":          ("margem", "acessório", "acessórios", "aparelho",
+                                  "aparelhos", "conserto", "assistência", "categoria"),
     "capacidade":                ("capacidade",),
     "perdas_validade":           ("perda", "perdas", "validade"),
     "margem_venda_aparelho":     ("margem", "venda", "aparelho", "aparelhos"),

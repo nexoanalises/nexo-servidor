@@ -62,9 +62,12 @@ CASOS = [
         "nome": "celular · capa ↔ acessório",
         "prova": "o elo só se forma se a etapa 0 tiver produzido o vínculo item ∈ categoria",
         "ambiente": "celular",
+        # 🔴 ALINHADO AO CONTRATO REAL (#095): o formulário nunca perguntou margem
+        # em percentual. Pergunta `margem_categoria` em TEXTO — e o mapa do Celular
+        # sempre apontou para a relação heterogênea, texto ↔ texto por pertencimento.
         "dados": {"falta_declarada": "faltou capa de silicone",
-                  "margem_acessorios": "45"},
-        "deve_conter": [r"45", r"pertence a|categoria"],
+                  "margem_categoria": "acessórios deixam boa margem; aparelho novo quase não deixa"},
+        "deve_conter": [r"pertence a categoria", r"você declarou ter boa margem"],
         "jamais": [
             # ⚠️ A primeira versão desta linha era /caus|porque|derrub|impact/ e
             # reprovou a frase do PRÓPRIO fundador para o limite — que usa "porque"
@@ -83,11 +86,11 @@ CASOS = [
         "nome": "celular · 'capinha' — termo FORA do vocabulário",
         "prova": "abstinência cirúrgica: o fato de falta entra, o pertencimento não",
         "ambiente": "celular",
-        "dados": {"falta_declarada": "faltou capinha", "margem_acessorios": "45"},
+        "dados": {"falta_declarada": "faltou capinha", "margem_categoria": "acessórios deixam boa margem; aparelho novo quase não deixa"},
         "deve_conter": [],
         "jamais": [
             (r"acessório|categoria|pertence", "falso_relacionamento"),
-            (r"45", "conclusao_sem_origem"),
+            (r"boa margem", "conclusao_sem_origem"),
         ],
         "espera_saida": False,
         # A relação existe no mundo — "capinha" é capa. O silêncio aqui é correto E
@@ -108,7 +111,7 @@ CASOS = [
         "prova": "a relação formada tocou margem → o limite impede a decisão → publica",
         "ambiente": "celular",
         "preocupacao": "margem",
-        "dados": {"falta_declarada": "faltou capa de silicone", "margem_acessorios": "45"},
+        "dados": {"falta_declarada": "faltou capa de silicone", "margem_categoria": "acessórios deixam boa margem; aparelho novo quase não deixa"},
         "deve_conter": [r"não foi possível avaliar", r"não possui margem apurada"],
         "jamais": [
             (r"você deveria ter|não informou|deixou de", "conclusao_sem_origem"),
@@ -121,11 +124,12 @@ CASOS = [
         "prova": "a preocupação não suprime: o limite sai porque a evidência o tornou relevante",
         "ambiente": "celular",
         "preocupacao": "estoque",
-        "dados": {"falta_declarada": "faltou capa de silicone", "margem_acessorios": "45"},
+        "dados": {"falta_declarada": "faltou capa de silicone", "margem_categoria": "acessórios deixam boa margem; aparelho novo quase não deixa"},
         # ⚡ O caso que a correção do fundador criou. Com a preocupação como único
         # portão, esta linha estaria ausente — e o produto teria calado uma ausência
         # estrutural que impedia justamente a decisão que os dados levantaram.
-        "deve_conter": [r"45", r"pertence a|categoria", r"não foi possível avaliar"],
+        "deve_conter": [r"pertence a categoria", r"você declarou ter boa margem",
+                        r"não foi possível avaliar"],
         "jamais": [
             (r"causou|por causa|resultou em|levou a", "conclusao_sem_origem"),
         ],
@@ -136,7 +140,7 @@ CASOS = [
         "prova": "sem relação formada, nenhum tópico está na mesa: registra e cala",
         "ambiente": "celular",
         "preocupacao": "estoque",
-        "dados": {"falta_declarada": "faltou capinha", "margem_acessorios": "45"},
+        "dados": {"falta_declarada": "faltou capinha", "margem_categoria": "acessórios deixam boa margem; aparelho novo quase não deixa"},
         "deve_conter": [],
         "jamais": [
             # Repetido todo mês sem nada ter mudado, deixaria de ser transparência e
@@ -144,6 +148,32 @@ CASOS = [
             (r"não foi possível avaliar", "ruido_institucional"),
             (r"não possui margem apurada", "ruido_institucional"),
         ],
+        "espera_saida": False,
+    },
+    {
+        "nome": "celular · faltou APARELHO, e a boa margem é do acessório",
+        "prova": "o encontro é por CATEGORIA: cada uma carrega a sua própria declaração",
+        "ambiente": "celular",
+        "preocupacao": "margem",
+        "dados": {"falta_declarada": "faltou aparelho",
+                  "margem_categoria": "acessórios deixam boa margem; aparelho novo quase não deixa"},
+        "deve_conter": [r"margem baixa"],
+        "jamais": [
+            # ⛔ A margem do acessório não pode migrar para o aparelho.
+            (r"boa margem", "falso_relacionamento"),
+            (r"causou|deixou de vender|perdeu", "conclusao_sem_origem"),
+        ],
+        "espera_saida": True,
+    },
+    {
+        "nome": "celular · margem declarada SEM categoria reconhecível",
+        "prova": "qualificador solto não vira margem de ninguém",
+        "ambiente": "celular",
+        "preocupacao": "margem",
+        "dados": {"falta_declarada": "faltou capa de silicone",
+                  "margem_categoria": "esse ano a margem melhorou bastante"},
+        "deve_conter": [],
+        "jamais": [(r"pertence|boa margem|categoria acess", "falso_relacionamento")],
         "espera_saida": False,
     },
     {
@@ -218,8 +248,8 @@ CASOS = [
         "nome": "celular · película — outro item do vocabulário",
         "prova": "o pertencimento não é caso especial da capa",
         "ambiente": "celular",
-        "dados": {"falta_declarada": "faltou película", "margem_acessorios": "45"},
-        "deve_conter": [r"45", r"pertence|categoria"],
+        "dados": {"falta_declarada": "faltou película", "margem_categoria": "acessórios deixam boa margem; aparelho novo quase não deixa"},
+        "deve_conter": [r"pertence a categoria", r"você declarou ter boa margem"],
         "jamais": [(r"capa|silicone", "conclusao_sem_origem")],
         "espera_saida": True,
     },
@@ -227,8 +257,8 @@ CASOS = [
         "nome": "celular · 'CAPA DE SILICONI' — erro de grafia no item",
         "prova": "degradação graciosa: casa pelo termo declarado mais amplo",
         "ambiente": "celular",
-        "dados": {"falta_declarada": "FALTOU CAPA DE SILICONI", "margem_acessorios": "45"},
-        "deve_conter": [r"45"],
+        "dados": {"falta_declarada": "FALTOU CAPA DE SILICONI", "margem_categoria": "acessórios deixam boa margem; aparelho novo quase não deixa"},
+        "deve_conter": [r"pertence a categoria"],
         "jamais": [(r"siliconi", "conclusao_sem_origem")],
         "espera_saida": True,
     },
@@ -282,7 +312,7 @@ CASOS = [
         "ambiente": "celular",
         "dados": {"falta_declarada": "faltou carregador"},
         "deve_conter": [],
-        "jamais": [(r"categoria|pertence|margem de acess", "falso_relacionamento")],
+        "jamais": [(r"categoria|pertence|boa margem", "falso_relacionamento")],
         "espera_saida": False,
     },
 ]

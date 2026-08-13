@@ -12,8 +12,8 @@
 # ser dita com os verbos do seu elo.
 
 from catalogo import (
-    ELOS, INEXISTENTES_NO_PRODUTO, LIMITES_DECLARADOS, OPERADORES, PARES,
-    ROTULO_PUBLICO, formatar,
+    ELOS, FRASE_DA_MARGEM, INEXISTENTES_NO_PRODUTO, LIMITES_DECLARADOS,
+    NOME_CATEGORIA, OPERADORES, PARES, ROTULO_PUBLICO, formatar,
 )
 
 
@@ -26,7 +26,7 @@ class Conclusao:
 
     def __init__(self, cid, par, elo, estado, fatos, valor_derivado=None,
                  qualificacoes=(), urgencia="nao_apurada", toca=(), semantica=None,
-                 nucleos=()):
+                 nucleos=(), atribuicoes=()):
         self.id = cid
         self.par = par
         self.elo = elo
@@ -37,6 +37,8 @@ class Conclusao:
         # 🔑 O que o Fiscal 10 realmente exige de volta: evento nomeado + atribuição ao
         # lojista. A FORMA da frase é sugestão; o NÚCLEO é obrigação.
         self.nucleos = tuple(nucleos)
+        # Declarações do lojista que precisam continuar sendo DELE na redação.
+        self.atribuicoes = tuple(atribuicoes)
         self.urgencia = urgencia
         # Tópicos de decisão que esta conclusão coloca em avaliação. É o canal pelo
         # qual a evidência — e não a preocupação declarada — decide se um limite
@@ -59,6 +61,9 @@ class Conclusao:
         entram o valor semântico normalizado e o trecho atômico da proveniência.
         """
         termos = set()
+        for at in self.atribuicoes:
+            termos.add(at["trecho"])
+            termos.update(at["frase"].split())
         for ficha in self.semantica.values():
             for t in ficha.get("termos", ()):
                 if not t:
@@ -135,6 +140,14 @@ def _ficha(ev):
         return {"publicavel": formatar(ev.valor, ev.campo), "termos": ()}
 
     v = ev.vinculos
+    if v.get("margens"):
+        termos = []
+        for cat, ficha in v["margens"].items():
+            termos += [cat, ficha["trecho"]]
+        rotulos = " · ".join(sorted(v["margens"]))
+        return {"publicavel": "margem declarada para %s" % rotulos,
+                "termos": tuple(t for t in termos if t)}
+
     termos, partes = [], []
     if v.get("item"):
         termos += [v["item"], v.get("trecho_item")]
@@ -179,11 +192,29 @@ def _elo_satisfeito(decl, evidencias):
     """ETAPA 3 — o elo precisa ser DECLARADO **e** SATISFEITO pelos valores desta
     análise. Declarado mas não satisfeito → não formada."""
     exige = decl.get("exige_vinculo")
-    if not exige:
-        return True
-    campo, categoria = exige
-    ev = evidencias.get(campo)
-    return bool(ev and ev.vinculos.get("categoria") == categoria)
+    if exige:
+        campo, categoria = exige
+        ev = evidencias.get(campo)
+        return bool(ev and ev.vinculos.get("categoria") == categoria)
+
+    # 🔗 O encontro de DUAS extrações de texto: a categoria do item que faltou
+    # precisa ser uma das categorias que o lojista qualificou. Nenhuma das pontas
+    # é número — é o caso heterogêneo que o mapa do Celular sempre apontou.
+    comum = decl.get("exige_categoria_comum")
+    if comum:
+        return bool(_categoria_comum(comum, evidencias))
+    return True
+
+
+def _categoria_comum(comum, evidencias):
+    """Devolve (categoria, qualificador) quando as duas pontas se encontram."""
+    campo_item, campo_margem = comum
+    a, b = evidencias.get(campo_item), evidencias.get(campo_margem)
+    if not a or not b:
+        return None
+    cat = a.vinculos.get("categoria")
+    ficha = (b.vinculos.get("margens") or {}).get(cat)
+    return (cat, ficha) if cat and ficha else None
 
 
 def _urgencia(decl, evidencias):
@@ -264,12 +295,29 @@ def avaliar(ambiente, evidencias, abstencoes=(), preocupacao=None):
         qualificacoes, nucleos = _freios(evidencias)
         estado = "enfraquecida" if qualificacoes else "formada"
 
+        # 🔒 ATRIBUIÇÕES — declarações do lojista que a redação NÃO pode transformar
+        # em fato apurado. "acessório deixa boa margem" é opinião dele; se a frase
+        # sair sem "você declarou", o produto passa a afirmar uma margem que ninguém
+        # apurou. Não é freio: não rebaixa a conclusão, não muda o estado. É a lei da
+        # proveniência (#093) chegando na saída.
+        atribuicoes = []
+        achado = _categoria_comum(decl.get("exige_categoria_comum") or (), evidencias) \
+            if decl.get("exige_categoria_comum") else None
+        if achado:
+            cat, ficha = achado
+            atribuicoes.append({"evento": ficha["trecho"],
+                                "trecho": ficha["trecho"],
+                                "frase": FRASE_DA_MARGEM[ficha["qualificador"]],
+                                "categoria": NOME_CATEGORIA.get(cat, cat),
+                                "qualificador": ficha["qualificador"]})
+
         conclusoes.append(Conclusao(
             cid, decl["par"], decl["elo"], estado,
             fatos={a: evidencias[a].valor, b: evidencias[b].valor},
             valor_derivado=derivado,
             qualificacoes=qualificacoes,
             nucleos=nucleos,
+            atribuicoes=atribuicoes,
             urgencia=_urgencia(decl, evidencias),
             toca=decl.get("toca", ()),
             semantica={c: _ficha(evidencias[c]) for c in (a, b)},

@@ -97,6 +97,14 @@ def _relacao_publicavel(unidade):
     if unidade.forca_conclusao == "coocorrencia":
         return "%s %s %s de %s" % (fb, _concordar(unidade.verbos[0], fb), ra, fa)
     if unidade.forca_conclusao == "pertencimento":
+        at = unidade.atribuicoes[0] if getattr(unidade, "atribuicoes", ()) else None
+        if at:
+            # ⛔ Não quantifica a perda, não calcula margem, não diz quanto comprar.
+            # Diz o pertencimento — e preserva de quem é a declaração de margem.
+            # O verbo canônico já termina em " a" — repetir o artigo produziria
+            # "pertence a a categoria".
+            return "%s %s categoria %s, %s" % (
+                fa, _concordar(unidade.verbos[0], fa), at["categoria"], at["frase"])
         return "%s %s uma categoria com %s de %s" % (fa, _concordar(unidade.verbos[0], fa),
                                                      rb, fb)
     return "%s %s %s" % (ra, verbo, rb)

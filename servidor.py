@@ -9,6 +9,8 @@ from dateutil.relativedelta import relativedelta
 import os
 import sys
 import hmac
+import uuid
+import collections
 import json
 import unicodedata
 import requests
@@ -64,6 +66,14 @@ LAB_TOKEN = os.environ.get("LAB_TOKEN", "")
 # — custa zero token e responde relações, abstinências, limites e recall. A fase do
 # MODELO nasce DESLIGADA porque consome a mesma cota diária do cliente pagante:
 # `SHADOW_REDACAO=1` liga, `SHADOW_AMOSTRA` limita a fração das análises.
+# 🪟 JANELA DE OBSERVAÇÃO — as últimas N observações do shadow, saneadas, em memória.
+#
+# ⚠️ É JANELA, NÃO REGISTRO OFICIAL. Some em restart e em deploy; se o Railway rodar
+# mais de uma instância, ela vê só o que passou por este processo. Para a fase de
+# shadow isso basta — banco ou Redis agora seria infraestrutura demais antes de
+# sabermos se o shadow produz informação útil.
+_JANELA_SHADOW = collections.deque(maxlen=60)
+
 SHADOW_MOTOR   = os.environ.get("SHADOW_MOTOR", "1") != "0"
 SHADOW_REDACAO = os.environ.get("SHADOW_REDACAO", "") == "1"
 try:
@@ -2288,6 +2298,14 @@ def _observar_em_shadow(segmento, brutos, analise):
         print(resumo(reg), flush=True)
         for linha in detalhe(reg):
             print(linha, flush=True)
+
+        # Janela de observação — bounded, efêmera, saneada. Ver `sanear()`.
+        from shadow import sanear
+        _JANELA_SHADOW.append({
+            "quando": datetime.now().isoformat(timespec="seconds"),
+            "id": uuid.uuid4().hex[:8],
+            **sanear(reg),
+        })
     except Exception as e:                              # noqa: BLE001
         # Falha do shadow NUNCA é falha da análise. O cliente não fica sabendo.
         print("SHADOW|erro-interno|%s: %s" % (type(e).__name__, e), flush=True)
@@ -2518,6 +2536,38 @@ def optin():
         resp = jsonify({"status": "erro", "motivo": "falha no cadastro"})
         resp.status_code = 502
         return _optin_cors(resp)
+
+@app.route("/laboratorio", methods=["GET"])
+def laboratorio_janela():
+    """🪟 SOMENTE LEITURA — a janela de observação do shadow, saneada.
+
+    Existe porque um shadow que ninguém consegue observar regularmente vira
+    instrumentação decorativa, e depender de copiar log à mão durante dias faria a
+    amostra ficar pequena e irregular.
+
+    ⛔ NÃO é uma API de observabilidade genérica: nenhum argumento aqui altera
+    shadow, prompt, caso ou qualquer estado. Só devolve o que já foi decidido que
+    pode sair — e a rota continua 404 sem o token certo.
+    """
+    if not LAB_TOKEN or not hmac.compare_digest(
+            request.headers.get("X-Lab-Token", ""), LAB_TOKEN):
+        return jsonify({"status": "erro", "motivo": "rota inativa"}), 404
+    try:
+        sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                        "lab_prototipo"))
+        from shadow import agregar
+        janela = list(_JANELA_SHADOW)
+        return jsonify({
+            "aviso": "janela de observação — efêmera, some em restart/deploy e pode "
+                     "não cobrir todas as instâncias. Não é registro oficial.",
+            "build": (os.environ.get("RAILWAY_GIT_COMMIT_SHA") or "desconhecido")[:7],
+            "redacao_ligada": SHADOW_REDACAO,
+            "totais": agregar(janela),
+            "observacoes": janela,
+        }), 200
+    except Exception as e:                                   # noqa: BLE001
+        return jsonify({"status": "erro", "motivo": "%s: %s" % (type(e).__name__, e)}), 500
+
 
 @app.route("/laboratorio", methods=["POST"])
 def laboratorio():

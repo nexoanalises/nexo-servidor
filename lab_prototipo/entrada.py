@@ -18,7 +18,8 @@ import re
 import unicodedata
 
 from catalogo import (
-    EVENTOS_FREIO, MARCADORES_FALTA, NATUREZA, PERTENCIMENTO,
+    CATEGORIAS, EVENTOS_FREIO, MARCADORES_FALTA, NATUREZA, PERTENCIMENTO,
+    QUALIFICADORES_MARGEM,
 )
 
 
@@ -111,7 +112,7 @@ def _prova_tipo(campo, bruto):
     return str(bruto or "").strip(), None
 
 
-def _prova_vocabulario(campo, valor):
+def _prova_vocabulario(campo, valor):  # noqa: C901
     """③ VOCABULÁRIO — todo significado atribuído a texto livre vem de termo APROVADO.
 
     Aqui mora a diferença entre normalizar e adivinhar. "capa de silicone" vira
@@ -170,6 +171,40 @@ def _prova_vocabulario(campo, valor):
                 # proveniência viraria túnel para reintroduzir lógica não autorizada.
                 vinculos["trecho_item"] = _trecho_original(valor, termo)
                 break
+
+        # O lojista pode nomear a CATEGORIA direto — "faltou aparelho" — em vez de
+        # um item dela. O termo já está declarado em CATEGORIAS; não reconhecê-lo
+        # seria cegueira de implementação, não abstinência.
+        if "categoria" not in vinculos:
+            for termo in sorted(CATEGORIAS, key=len, reverse=True):
+                if termo in c:
+                    vinculos["categoria"] = CATEGORIAS[termo]
+                    vinculos["item"] = termo
+                    vinculos["trecho_item"] = _trecho_original(valor, termo)
+                    break
+
+    # Margem declarada por categoria — o campo REAL do formulário, em texto livre.
+    #
+    # A leitura é por FRAGMENTO ("acessórios deixam boa margem; aparelho quase não
+    # deixa"), e só vale quando categoria E qualificador aparecem NO MESMO fragmento.
+    # Categoria solta ou qualificador solto → abstém-se daquele fragmento. Juntar
+    # pedaços de orações diferentes seria inventar de quem é a margem.
+    if campo == "margem_categoria":
+        declaradas = {}
+        for fragmento in re.split(r"[;,.]| e ", str(valor)):
+            f = canonizar(fragmento)
+            if not f:
+                continue
+            cat = next((CATEGORIAS[t] for t in sorted(CATEGORIAS, key=len, reverse=True)
+                        if t in f), None)
+            qual = next((QUALIFICADORES_MARGEM[q]
+                         for q in sorted(QUALIFICADORES_MARGEM, key=len, reverse=True)
+                         if canonizar(q) in f), None)
+            if cat and qual and cat not in declaradas:
+                declaradas[cat] = {"qualificador": qual,
+                                   "trecho": fragmento.strip()}
+        if declaradas:
+            vinculos["margens"] = declaradas
 
     if not vinculos:
         return {}, "nenhum termo do vocabulário aprovado reconhecido no texto"

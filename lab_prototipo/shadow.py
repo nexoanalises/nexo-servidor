@@ -62,19 +62,18 @@ MAPA_CAMPOS = {
         "o_que_faltou":   "falta_declarada",
     },
     "celular": {
-        "o_que_faltou":   "falta_declarada",
-        "acoes_quais":    "acoes_quais",
-        "lucro":          "lucro",
+        "o_que_faltou":     "falta_declarada",
+        # 🔴 O ALINHAMENTO QUE O SHADOW EXIGIU (#095): o campo real é este, em texto.
+        "margem_categoria": "margem_categoria",
+        "acoes_quais":      "acoes_quais",
+        "lucro":            "lucro",
     },
 }
 
-SEM_CORRESPONDENTE = {
-    "celular": {
-        "margem_acessorios":
-            "o formulário pergunta `margem_categoria` em TEXTO, não percentual por "
-            "categoria — o elo de pertencimento não tem como se formar",
-    },
-}
+# 🟢 RESOLVIDO. O par do Celular passou a usar `margem_categoria` — o campo que o
+# formulário realmente coleta. Era divergência entre o protótipo e o contrato real,
+# não necessidade nova do produto: NENHUM campo foi criado.
+SEM_CORRESPONDENTE = {}
 
 
 def _fmt_br(v):
@@ -199,3 +198,78 @@ def detalhe(reg):
     for e in reg["erros"]:
         linhas.append("  ⚠️ erro · %s: %s" % (e["id"], e["erro"]))
     return linhas
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# JANELA DE OBSERVAÇÃO — o registro SANEADO que a /laboratorio devolve.
+#
+# ⚠️ E o nome importa: é **janela**, não registro oficial. Vive em memória, some em
+# restart ou deploy, e se o Railway rodar mais de uma instância ela vê só as análises
+# que passaram pelo processo que respondeu. Para a fase de shadow isso basta —
+# acrescentar banco ou Redis agora seria infraestrutura demais antes de sabermos se
+# o shadow produz informação útil.
+#
+# 🔒 O QUE NUNCA ENTRA: prosa do lojista, payload do formulário, nome de negócio.
+# Nem em trecho. O `trecho` atômico — "acessórios deixam boa margem" — é literalmente
+# a frase dele, então a janela guarda a CLASSE (margem_alta) e a categoria, não o
+# texto. E a redação do modelo fica de fora: o que sobrevive é o veredito e a falha,
+# que nomeiam o termo problemático sem carregar a frase inteira.
+#
+# O detalhe completo continua no log do Railway, para quem tiver acesso a ele.
+# ─────────────────────────────────────────────────────────────────────────────
+
+def sanear(reg):
+    """Devolve a versão da observação que pode sair pela rota. Só isto sai."""
+    limpo = {
+        "ambiente": reg.get("ambiente"),
+        "segmento_conhecido": bool(reg.get("ambiente")),
+        "pares_declarados": reg.get("pares_declarados", 0),
+        "campos_lidos": reg.get("campos_lidos", []),
+        "abstencoes": [a["campo"] for a in reg.get("abstencoes", [])],
+        "silencios": [{"par": s["par"], "caso": s["caso"]}
+                      for s in reg.get("silencios", [])],
+        "limites": [{"par": l["par"], "publicaria": l["publicaria"],
+                     "motivo": l["motivo"]} for l in reg.get("limites", [])],
+        "divergencias": [{"id": d["id"], "derivado": d["derivado"]}
+                         for d in reg.get("divergencias", [])],
+        "erros": len(reg.get("erros", [])),
+        "unidades": [],
+    }
+    for u in reg.get("unidades", []):
+        item = {"id": u["id"], "par": u["par"], "elo": u["elo"],
+                "estado": u["estado"], "forca_conclusao": u["forca_conclusao"],
+                "valor_derivado": u["valor_derivado"],
+                "tem_qualificacao": bool(u.get("qualificacoes"))}
+        if "aprovado" in u:
+            item["aprovado"] = u["aprovado"]
+            item["falhas"] = [f["checagem"] for f in u.get("falhas", ())]
+            item["termos_novos"] = u.get("termos_novos", [])
+        limpo["unidades"].append(item)
+    return limpo
+
+
+def agregar(janela):
+    """Métricas da janela inteira — é por elas que o portão do #095 se lê."""
+    t = {"observacoes": len(janela), "por_ambiente": {}, "unidades": 0,
+         "aprovadas": 0, "reprovadas": 0, "silencios": 0, "abstencoes": 0,
+         "limites_publicados": 0, "limites_registrados": 0, "divergencias": 0,
+         "erros": 0, "sem_catalogo": 0, "termos_novos": {}}
+    for reg in janela:
+        amb = reg.get("ambiente") or "(sem catálogo)"
+        t["por_ambiente"][amb] = t["por_ambiente"].get(amb, 0) + 1
+        if not reg.get("segmento_conhecido"):
+            t["sem_catalogo"] += 1
+        t["silencios"] += len(reg.get("silencios", []))
+        t["abstencoes"] += len(reg.get("abstencoes", []))
+        t["divergencias"] += len(reg.get("divergencias", []))
+        t["erros"] += reg.get("erros", 0)
+        for l in reg.get("limites", []):
+            t["limites_publicados" if l["publicaria"] else "limites_registrados"] += 1
+        for u in reg.get("unidades", []):
+            t["unidades"] += 1
+            if "aprovado" in u:
+                t["aprovadas" if u["aprovado"] else "reprovadas"] += 1
+            for termo in u.get("termos_novos", ()):
+                t["termos_novos"][termo] = t["termos_novos"].get(termo, 0) + 1
+    t["termos_novos"] = dict(sorted(t["termos_novos"].items(), key=lambda kv: -kv[1]))
+    return t

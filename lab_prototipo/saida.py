@@ -92,8 +92,13 @@ def redator_gabarito(unidade):
     elif unidade.forca_conclusao == "coocorrencia":
         frase = ("a %s de %s%% %s a %s declarada" % (ra, _fmt(va), verbo, rb))
     elif unidade.forca_conclusao == "pertencimento":
-        frase = ("o item da %s declarada %s uma categoria com %s de %s%%"
-                 % (ra, verbo, rb, _fmt(vb)))
+        # 🔴 Alinhado ao contrato real (#095): a segunda ponta é TEXTO — a margem que
+        # o lojista declarou por categoria —, não um percentual que o produto apura.
+        # ⛔ Não quantifica a perda, não calcula margem, não diz quanto comprar.
+        at = unidade.atribuicoes[0] if unidade.atribuicoes else None
+        fa = unidade.semantica.get(a, {}).get("publicavel", ra)
+        frase = ("%s %s categoria %s, %s" % (fa, verbo, at["categoria"], at["frase"])
+                 if at else "%s %s uma categoria declarada" % (fa, verbo))
     else:
         frase = ("%s %s %s" % (ra, verbo, rb))
 
@@ -179,6 +184,15 @@ def fiscal_10(unidade, texto, exigir_cobertura=True):
     # é exigência de superfície: impede o redator de escrever português natural sem
     # alterar verdade lógica nenhuma. E era o mesmo erro do defeito 6, uma camada
     # acima — lá a forma do verbo, aqui a forma da qualificação.
+    # 🔒 As ATRIBUIÇÕES seguem a mesma prova das qualificações: o que o lojista
+    # declarou continua sendo declaração dele. Sem isso, "acessório deixa boa margem"
+    # sai como se o NEXO tivesse apurado a margem.
+    for at in getattr(unidade, "atribuicoes", ()):
+        if not any(m in c for m in MARCADORES_ATRIBUICAO):
+            v.reprovar("qualificacao",
+                       "atribuição ao lojista perdida na margem declarada (%s)"
+                       % at["categoria"])
+
     for nucleo in (getattr(unidade, "nucleos", ()) or _nucleos_de(unidade)):
         formas = {_canon(nucleo["evento"])}
         if nucleo.get("trecho"):
@@ -211,6 +225,9 @@ def fiscal_10(unidade, texto, exigir_cobertura=True):
             autorizadas |= set(expr.split())
         for q in unidade.qualificacoes:
             autorizadas |= {_canon(x) for x in q.split()}
+        for at in getattr(unidade, "atribuicoes", ()):
+            autorizadas |= {_canon(x) for x in at["frase"].split()}
+            autorizadas |= {_canon(x) for x in at["trecho"].split()}
         autorizadas = {_canon(x) for x in autorizadas}
 
         novos = []
