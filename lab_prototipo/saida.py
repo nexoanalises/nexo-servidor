@@ -22,6 +22,7 @@ import unicodedata
 
 from catalogo import (
     LEXICO_LOGICO, MARCADORES_PROVENIENCIA, PALAVRAS_FUNCIONAIS, ROTULOS,
+    formas_aceitas,
 )
 from motor import Conclusao
 
@@ -148,7 +149,11 @@ def fiscal_10(unidade, texto, exigir_cobertura=True):
             v.reprovar("numero", "%s não existe na origem %s" % (_fmt(n), unidade.id))
 
     # ② VERBO — toda expressão lógica reconhecida está entre as autorizadas?
-    autorizados = {_canon(x) for x in unidade.verbos}
+    #
+    # 🔧 As formas DECLARADAS do verbo, não só a canônica: "equivalem a" é "equivale a"
+    # com concordância, e conjugar não é trocar de verbo. O conjunto continua fechado —
+    # o que mudou é que ele passou a conter o português, não só o infinitivo de fichário.
+    autorizados = {_canon(x) for x in formas_aceitas(unidade.verbos)}
     for expr, classe in LEXICO_LOGICO.items():
         if _canon(expr) in c and _canon(expr) not in autorizados:
             v.reprovar("verbo", "expressão %r (classe %s) não autorizada em %s"

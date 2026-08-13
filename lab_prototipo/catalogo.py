@@ -324,26 +324,79 @@ seus suas este esta esse essa isso mais menos até desde não período mesmo mes
 juntos junta juntas r$ reais % pontos percentuais você lojista item itens
 """.split())
 
-LEXICO_LOGICO = {
-    # proporção
-    "representa": "proporcao", "equivale a": "proporcao", "corresponde a": "proporcao",
-    # comparação de ritmo
-    "avança mais devagar que": "comparacao_ritmo", "acompanha": "comparacao_ritmo",
-    "diverge de": "comparacao_ritmo",
-    # pertencimento
-    "pertence a": "pertencimento", "está na categoria": "pertencimento",
-    "classifica-se como": "pertencimento",
-    # coocorrência
-    "ocorreu no mesmo período que": "coocorrencia", "coincidiu com": "coocorrencia",
-    "aconteceu junto com": "coocorrencia",
-    # endereço
-    "incide sobre": "endereco", "diz respeito a": "endereco",
+# ⚠️ O DEFEITO 6, e ele é a raiz dos falsos positivos da rodada 2: o fiscal exigia a
+# FORMA do verbo, não o VERBO. O modelo escreveu "os descontos **equivalem a** 77,5%
+# do lucro" — que é `equivale a` com concordância de plural — e foi reprovado por
+# "nenhum verbo autorizado aparece". Exigir o singular com sujeito plural obrigaria o
+# produto a escrever português errado.
+#
+#     ### Conjugar não é trocar de verbo.
+#
+# A saída NÃO é stemming nem heurística de radical: continuaria sendo adivinhação, e
+# poderia casar palavra sem parentesco. As formas são DECLARADAS, como todo o resto —
+# terceira pessoa do singular e do plural, que é como um fato se enuncia.
+
+EXPRESSOES_LOGICAS = {
+    # canônica ................ (classe, formas aceitas)
+    "representa":                   ("proporcao", ("representa", "representam")),
+    "equivale a":                   ("proporcao", ("equivale a", "equivalem a")),
+    "corresponde a":                ("proporcao", ("corresponde a", "correspondem a")),
+
+    "avança mais devagar que":      ("comparacao_ritmo", ("avança mais devagar que",
+                                                          "avançam mais devagar que")),
+    "acompanha":                    ("comparacao_ritmo", ("acompanha", "acompanham")),
+    "diverge de":                   ("comparacao_ritmo", ("diverge de", "divergem de")),
+
+    "pertence a":                   ("pertencimento", ("pertence a", "pertencem a")),
+    "está na categoria":            ("pertencimento", ("está na categoria",
+                                                       "estão na categoria")),
+    "classifica-se como":           ("pertencimento", ("classifica-se como",
+                                                       "classificam-se como")),
+
+    "ocorreu no mesmo período que": ("coocorrencia", ("ocorreu no mesmo período que",
+                                                      "ocorreram no mesmo período que")),
+    "coincidiu com":                ("coocorrencia", ("coincidiu com", "coincidiram com")),
+    "aconteceu junto com":          ("coocorrencia", ("aconteceu junto com",
+                                                      "aconteceram junto com")),
+
+    "incide sobre":                 ("endereco", ("incide sobre", "incidem sobre")),
+    "diz respeito a":               ("endereco", ("diz respeito a", "dizem respeito a")),
+
     # ⛔ CAUSALIDADE — reconhecida para poder ser REPROVADA, jamais autorizada.
     # Nenhum elo tem força de conclusão "causal", então nenhuma unidade pode
-    # autorizá-las: aparecer é reprovar.
-    "porque": "causal", "por isso": "causal", "levou a": "causal",
-    "resultou em": "causal", "trouxe": "causal", "causou": "causal",
-    "provocou": "causal", "gerou": "causal", "por causa": "causal",
-    "fez com que": "causal", "se paga": "causal", "graças a": "causal",
-    "devido a": "causal", "em função de": "causal", "impactou": "causal",
+    # autorizá-las: aparecer é reprovar. E aqui as formas servem ao DIAGNÓSTICO —
+    # a segurança não depende desta lista estar completa, porque expressão que o
+    # fiscal não reconhece já cai na checagem de excesso, que se abstém para o
+    # lado seguro.
+    "causou":       ("causal", ("causou", "causaram")),
+    "provocou":     ("causal", ("provocou", "provocaram")),
+    "gerou":        ("causal", ("gerou", "geraram")),
+    "levou a":      ("causal", ("levou a", "levaram a")),
+    "resultou em":  ("causal", ("resultou em", "resultaram em")),
+    "trouxe":       ("causal", ("trouxe", "trouxeram")),
+    "fez com que":  ("causal", ("fez com que", "fizeram com que")),
+    "impactou":     ("causal", ("impactou", "impactaram")),
+    "se paga":      ("causal", ("se paga", "se pagam")),
+    "porque":       ("causal", ("porque",)),
+    "por isso":     ("causal", ("por isso",)),
+    "por causa":    ("causal", ("por causa",)),
+    "graças a":     ("causal", ("graças a",)),
+    "devido a":     ("causal", ("devido a",)),
+    "em função de": ("causal", ("em função de",)),
 }
+
+# Derivados — declaração única acima, nenhuma lista paralela para envelhecer sozinha.
+LEXICO_LOGICO = {forma: classe
+                 for _c, (classe, formas) in EXPRESSOES_LOGICAS.items()
+                 for forma in formas}
+
+FORMAS_DO_VERBO = {canonica: formas
+                   for canonica, (_cl, formas) in EXPRESSOES_LOGICAS.items()}
+
+
+def formas_aceitas(verbos):
+    """Todas as formas declaradas dos verbos autorizados de uma unidade."""
+    aceitas = set()
+    for v in verbos:
+        aceitas.update(FORMAS_DO_VERBO.get(v, (v,)))
+    return aceitas
