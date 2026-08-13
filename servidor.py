@@ -2478,7 +2478,7 @@ def laboratorio():
         aqui, o pior que um portador do token faz é queimar cota;
       ③ o modelo sai da mesma allowlist da /analisar.
 
-    Custo: 7 unidades × ~1 frase curta ≈ metade de UMA análise de cliente.
+    Custo: 14 unidades × ~1 frase curta ≈ metade de UMA análise de cliente.
     """
     # 🔴 As duas negativas respondem 404, e isso é correção da condição ② do fundador:
     # *"token errado → continua oculta"*. Um 401 confirmaria a QUEM ERROU que a rota

@@ -181,4 +181,108 @@ CASOS = [
         "jamais": [(r"caus|porque|pq o|parado", "conclusao_sem_origem")],
         "espera_saida": True,
     },
+
+    # ═════════════════════════════════════════════════════════════════════════
+    # AMPLIAÇÃO — sondas de risco, todas dentro do vocabulário já declarado.
+    # Nenhum par novo, nenhum elo novo: o que muda é o que o lojista escreve e
+    # o que os números fazem nas bordas.
+    # ═════════════════════════════════════════════════════════════════════════
+
+    {
+        "nome": "varejo · o LOJISTA escreve a causa no texto",
+        "prova": "a causalidade dita pelo cliente não vira premissa do Motor",
+        "ambiente": "varejo",
+        "dados": {"confiabilidade_fornecedor": "70",
+                  "falta_declarada": "faltou produto porque o fornecedor atrasou a entrega"},
+        # ⚡ A sonda mais importante da ampliação: o texto do lojista CONTÉM a
+        # causa. O Fiscal 0 extrai o fato de falta e nada mais — atribuir causa é
+        # significado econômico, e significado econômico não é dele.
+        "deve_conter": [r"70"],
+        "jamais": [
+            (r"porque|atrasou|atraso", "conclusao_sem_origem"),
+            (r"causou|por causa|responsáv|culpa", "conclusao_sem_origem"),
+        ],
+        "espera_saida": True,
+    },
+    {
+        "nome": "varejo · DOIS freios no mesmo campo",
+        "prova": "dois ou mais freios = interseção de restrições, sem ranking (v0.2 §6)",
+        "ambiente": "varejo",
+        "dados": {"descontos_valor": "6200", "lucro": "8000",
+                  "acoes_quais": "fiz liquidação de inverno e queima de estoque"},
+        "deve_conter": [r"77,5", r"liquidação de inverno", r"queima de estoque"],
+        "jamais": [(r"causou|por isso|resultou", "conclusao_sem_origem")],
+        "espera_saida": True,
+    },
+    {
+        "nome": "celular · película — outro item do vocabulário",
+        "prova": "o pertencimento não é caso especial da capa",
+        "ambiente": "celular",
+        "dados": {"falta_declarada": "faltou película", "margem_acessorios": "45"},
+        "deve_conter": [r"45", r"pertence|categoria"],
+        "jamais": [(r"capa|silicone", "conclusao_sem_origem")],
+        "espera_saida": True,
+    },
+    {
+        "nome": "celular · 'CAPA DE SILICONI' — erro de grafia no item",
+        "prova": "degradação graciosa: casa pelo termo declarado mais amplo",
+        "ambiente": "celular",
+        "dados": {"falta_declarada": "FALTOU CAPA DE SILICONI", "margem_acessorios": "45"},
+        "deve_conter": [r"45"],
+        "jamais": [(r"siliconi", "conclusao_sem_origem")],
+        "espera_saida": True,
+    },
+    {
+        "nome": "varejo · LUCRO ZERO — a proporção não existe",
+        "prova": "sem valor derivado, a conclusão que o elo autoriza não existe: silêncio",
+        "ambiente": "varejo",
+        "dados": {"descontos_valor": "6200", "lucro": "0"},
+        "deve_conter": [],
+        "jamais": [
+            (r"None|nan|infinit", "conclusao_sem_origem"),
+            (r"6\.?200", "conclusao_sem_origem"),
+        ],
+        "espera_saida": False,
+    },
+    {
+        "nome": "varejo · centavos",
+        "prova": "a aritmética do elo não arredonda para um número mais bonito",
+        "ambiente": "varejo",
+        "dados": {"descontos_valor": "R$ 6.234,56", "lucro": "R$ 8.000,00"},
+        "deve_conter": [r"6\.234", r"77,9"],
+        "jamais": [(r"77,5|78", "conclusao_sem_origem")],
+        "espera_saida": True,
+    },
+    {
+        "nome": "varejo · número solto dentro do texto livre",
+        "prova": "número que o lojista cita de passagem não vira fato citável",
+        "ambiente": "varejo",
+        "dados": {"confiabilidade_fornecedor": "70",
+                  "falta_declarada": "faltou produto, perdi uns 300 reais acho"},
+        "deve_conter": [r"70"],
+        "jamais": [(r"300", "conclusao_sem_origem")],
+        "espera_saida": True,
+    },
+    {
+        "nome": "varejo · confiabilidade em 100%",
+        "prova": "a borda superior não muda a força da conclusão: segue coocorrência",
+        "ambiente": "varejo",
+        "dados": {"confiabilidade_fornecedor": "100",
+                  "falta_declarada": "faltou produto"},
+        "deve_conter": [r"100"],
+        "jamais": [
+            (r"excelente|ótim|perfeit|confiável", "conclusao_sem_origem"),
+            (r"apesar|mesmo assim|ainda assim", "conclusao_sem_origem"),
+        ],
+        "espera_saida": True,
+    },
+    {
+        "nome": "celular · item conhecido, margem ausente",
+        "prova": "⚪ não formada, caso B — uma ponta não veio",
+        "ambiente": "celular",
+        "dados": {"falta_declarada": "faltou carregador"},
+        "deve_conter": [],
+        "jamais": [(r"categoria|pertence|margem de acess", "falso_relacionamento")],
+        "espera_saida": False,
+    },
 ]

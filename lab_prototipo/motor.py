@@ -137,12 +137,14 @@ def _ficha(ev):
         partes.append(v["item"])
     if v.get("categoria"):
         termos.append(v["categoria"])
-    if v.get("freio"):
-        termos.append(v["freio"].get("trecho"))
+    for freio in v.get("freios", ()):
+        termos.append(freio.get("trecho"))
     if v.get("fato") == "falta":
         publicavel = ("falta de %s" % partes[0]) if partes else "falta declarada"
     else:
-        publicavel = v.get("freio", {}).get("qualificacao", "declaração do lojista")
+        freios = v.get("freios", ())
+        publicavel = (" · ".join(f["qualificacao"] for f in freios) if freios
+                      else "declaração do lojista")
     return {"publicavel": publicavel, "termos": tuple(t for t in termos if t)}
 
 
@@ -155,9 +157,9 @@ def _freios(evidencias):
     """
     qualificacoes = []
     for ev in evidencias.values():
-        freio = ev.vinculos.get("freio")
-        if freio:
-            qualificacoes.append(freio["qualificacao"])
+        for freio in ev.vinculos.get("freios", ()):
+            if freio["qualificacao"] not in qualificacoes:
+                qualificacoes.append(freio["qualificacao"])
     return qualificacoes
 
 
@@ -237,13 +239,23 @@ def avaliar(ambiente, evidencias, abstencoes=(), preocupacao=None):
                                       "elo declarado, não satisfeito pelos valores"))
             continue
 
+        derivado = _derivar(decl, evidencias)
+        if decl.get("operacao") == "proporcao" and derivado is None:
+            # 🔴 Lucro zero. O elo existe e as duas pontas vieram — mas a conclusão
+            # que ele autoriza é uma PROPORÇÃO, e ela não existe para estes valores.
+            # Publicar a unidade sem o valor derivado seria publicar uma conclusão
+            # que o elo não produziu. Elo declarado, não satisfeito → silêncio.
+            silencios.append(Silencio(decl["par"], "A_elo_nao_satisfeito",
+                                      "proporção indefinida: %s vale zero" % b))
+            continue
+
         qualificacoes = _freios(evidencias)
         estado = "enfraquecida" if qualificacoes else "formada"
 
         conclusoes.append(Conclusao(
             cid, decl["par"], decl["elo"], estado,
             fatos={a: evidencias[a].valor, b: evidencias[b].valor},
-            valor_derivado=_derivar(decl, evidencias),
+            valor_derivado=derivado,
             qualificacoes=qualificacoes,
             urgencia=_urgencia(decl, evidencias),
             toca=decl.get("toca", ()),

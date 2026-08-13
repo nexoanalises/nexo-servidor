@@ -136,14 +136,21 @@ def _prova_vocabulario(campo, valor):
     # 🔑 NORMALIZAR NÃO É EMPOBRECER. A proveniência guarda o `trecho` exatamente como
     # o lojista escreveu, e a generalização só existe onde a apuração precisa dela: o
     # Motor casa pelo termo canônico, a auditoria confere contra a frase original.
-    for termo in sorted(EVENTOS_FREIO, key=len, reverse=True):
-        if canonizar(termo) in c:
-            vinculos["freio"] = {
-                "termo": termo,
-                "qualificacao": EVENTOS_FREIO[termo],
-                "trecho": _trecho_original(valor, termo),
-            }
-            break
+    # ⚠️ TODOS os freios do campo, não o primeiro: a v0.2 §6 diz que dois ou mais
+    # freios formam INTERSEÇÃO DE RESTRIÇÕES, sem ranking. Parar no primeiro
+    # descartava em silêncio uma qualificação obrigatória — a classe de falha que
+    # esta arquitetura inteira existe para impedir.
+    casados = [t for t in EVENTOS_FREIO if canonizar(t) in c]
+    # O genérico cai quando o específico também casou: "liquidação" não sobrevive ao
+    # lado de "liquidação de inverno". Perder especificidade é perder para sempre.
+    especificos = [t for t in casados
+                   if not any(t != o and canonizar(t) in canonizar(o) for o in casados)]
+    if especificos:
+        vinculos["freios"] = [
+            {"termo": t, "qualificacao": EVENTOS_FREIO[t],
+             "trecho": _trecho_original(valor, t)}
+            for t in sorted(especificos, key=lambda x: canonizar(str(valor)).find(canonizar(x)))
+        ]
 
     # Declaração de falta → extrai FATO e, quando o vocabulário permite, o ITEM.
     # Nunca motivo, culpa ou consequência — isso seria significado econômico.
@@ -181,9 +188,9 @@ def _prova_suporte(campo, valor, vinculos):
     item = vinculos.get("item")
     if item and canonizar(item) not in c:
         return None, "item extraído não aparece no texto de origem"
-    freio = vinculos.get("freio")
-    if freio and canonizar(freio["termo"]) not in c:
-        return None, "freio extraído não aparece no texto de origem"
+    for freio in vinculos.get("freios", ()):
+        if canonizar(freio["termo"]) not in c:
+            return None, "freio extraído não aparece no texto de origem"
     return True, None
 
 

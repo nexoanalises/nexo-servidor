@@ -22,7 +22,7 @@ import unicodedata
 
 from catalogo import (
     LEXICO_LOGICO, MARCADORES_PROVENIENCIA, PALAVRAS_FUNCIONAIS, ROTULOS,
-    formas_aceitas,
+    ROTULO_PUBLICO, formas_aceitas,
 )
 from motor import Conclusao
 
@@ -177,6 +177,11 @@ def fiscal_10(unidade, texto, exigir_cobertura=True):
         conhecidas = set(PALAVRAS_FUNCIONAIS)
         for campo in unidade.par:
             conhecidas |= {_canon(r) for r in ROTULOS.get(campo, ())}
+            # 🔧 Defeito 5: o rótulo PUBLICÁVEL é vocabulário declarado do catálogo,
+            # tanto quanto ROTULOS. Sem isto o fiscal barrava "concedidos" — palavra
+            # que sai de `ROTULO_PUBLICO["descontos_valor"] = "Descontos concedidos"`.
+            # Eu entregava o rótulo ao redator e depois o punia por usá-lo.
+            conhecidas |= {_canon(p) for p in ROTULO_PUBLICO.get(campo, "").split()}
         conhecidas |= MARCADORES_PROVENIENCIA
         # 🔧 O valor semântico normalizado e o trecho atômico da proveniência. Sem
         # isto o fiscal punia "capa de silicone" — que está na origem do fato.

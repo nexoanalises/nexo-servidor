@@ -24,7 +24,7 @@
 # "frase fiel barrada", e é sobre elas, e só sobre elas, que a calibragem se decide.
 
 from casos_ouro import CASOS
-from catalogo import ROTULO_PUBLICO, formatar
+from catalogo import FORMAS_DO_VERBO, ROTULO_PUBLICO, formatar
 from entrada import normalizar_formulario
 from motor import avaliar
 from saida import fiscal_10
@@ -75,27 +75,46 @@ def prompt_da_unidade(unidade):
 
 
 def _relacao_publicavel(unidade):
-    """A relação autorizada dita em português — não em nome interno de operação.
+    """A relação autorizada dita em português — e SÓ com vocabulário declarado.
 
-    🔧 O prompt antigo mandava `RELAÇÃO AUTORIZADA ENTRE ELES: proporcao`, e o modelo
-    devolvia "uma proporção", que o fiscal barrava como excesso. Punir o redator por
-    devolver o vocabulário que EU entreguei é defeito meu, não dele.
+    🔧 Defeito 5. O prompt antigo inventava a própria redação: mandava `proporcao`,
+    depois "equivalem a" (forma que a lista não declarava) e "categoria **cuja**
+    margem" — e o fiscal barrava tudo isso. Punir o redator por devolver o que EU
+    entreguei contaminou três rodadas de medição.
+
+    Agora o prompt usa o verbo canônico do elo e os rótulos do catálogo. Nada aqui
+    nasce fora do que já está declarado.
     """
     a, b = unidade.par
-    ra, rb = ROTULO_PUBLICO.get(a, a).lower(), ROTULO_PUBLICO.get(b, b).lower()
+    ra = ROTULO_PUBLICO.get(a, a).lower()
+    rb = ROTULO_PUBLICO.get(b, b).lower()
     fa = unidade.semantica.get(a, {}).get("publicavel", "")
     fb = unidade.semantica.get(b, {}).get("publicavel", "")
+    verbo = _concordar(unidade.verbos[0], ra)
 
     if unidade.forca_conclusao == "proporcao":
-        return ("%s equivalem a %s do %s"
-                % (ra, formatar(unidade.valor_derivado).replace(",0", "") + "%", rb))
+        return "%s %s %s do %s" % (ra, verbo, formatar(unidade.valor_derivado) + "%", rb)
     if unidade.forca_conclusao == "coocorrencia":
-        return "%s (%s) e %s aconteceram no mesmo período" % (ra, fa, fb)
+        return "%s %s %s de %s" % (fb, _concordar(unidade.verbos[0], fb), ra, fa)
     if unidade.forca_conclusao == "pertencimento":
-        return "%s pertence a uma categoria cuja %s é %s" % (fa, rb, fb)
-    if unidade.forca_conclusao == "comparacao_ritmo":
-        return "%s e %s podem ser comparados em ritmo" % (ra, rb)
-    return "%s e %s" % (ra, rb)
+        return "%s %s uma categoria com %s de %s" % (fa, _concordar(unidade.verbos[0], fa),
+                                                     rb, fb)
+    return "%s %s %s" % (ra, verbo, rb)
+
+
+def _concordar(verbo, sujeito):
+    """Escolhe a forma DECLARADA que concorda com o sujeito.
+
+    ⚠️ É gramática, não semântica: as duas formas já estão no catálogo e ambas são
+    aceitas pelo Fiscal 10. Isto existe só para o prompt não induzir o modelo a
+    escrever errado — um prompt ungramatical produz redação ungramatical.
+    """
+    formas = sorted(FORMAS_DO_VERBO.get(verbo, (verbo,)))
+    plural = sujeito.strip().split()[0].endswith("s") if sujeito.strip() else False
+    if len(formas) < 2:
+        return verbo
+    curta, longa = sorted(formas, key=len)[:2]
+    return longa if plural else curta
 
 
 def _classificar(veredito):
