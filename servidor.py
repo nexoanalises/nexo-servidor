@@ -961,6 +961,37 @@ def _bloco_metas(dados):
                   "cálculos realizados nesta análise.")
     return linhas
 
+# 🔴 CAUSA A (14/08) — REVISÃO DO MESMO PERÍODO NÃO É CICLO, defesa no Motor.
+# A correção nasce na seleção do histórico (app), mas o cliente 1.0.2.0 já instalado
+# não filtra na origem: se ele rodar o mesmo mês de novo, manda "ANÁLISE ANTERIOR 1"
+# com o período atual, e o Motor compararia Agosto × Agosto. Esta defesa neutraliza
+# isso na leitura, antes de qualquer cálculo — protege TODOS os clientes.
+def _norm_periodo(p):
+    p = unicodedata.normalize("NFD", (p or ""))
+    p = "".join(c for c in p if not unicodedata.combining(c))
+    return re.sub(r"[^a-z0-9]", "", p.lower())
+
+def _mesmo_periodo(p1, p2):
+    a, b = _norm_periodo(p1), _norm_periodo(p2)
+    return bool(a) and a == b
+
+def _revisao_do_mesmo_periodo(dados):
+    """A ANÁLISE ANTERIOR 1 tem o mesmo período que os DADOS ATUAIS?"""
+    m_ant = re.search(r"ANÁLISE ANTERIOR 1 \(período:\s*(.*?)[,)]", dados or "")
+    if not m_ant:
+        return False
+    atual = (dados or "").split("=== DADOS ATUAIS ===", 1)[-1]
+    m_at = re.search(r"^periodo:\s*(.*)$", atual, re.M | re.I)
+    return bool(m_at) and _mesmo_periodo(m_ant.group(1), m_at.group(1))
+
+def _neutralizar_revisao(dados):
+    """Se o predecessor for do mesmo período, remove o bloco anterior — downstream vê
+    'primeira análise' (sem giro, sem §2 de ciclo, sem comparação). É a leitura honesta:
+    duas fotos do mesmo mês não formam evolução."""
+    if _revisao_do_mesmo_periodo(dados):
+        return "=== DADOS ATUAIS ===\n" + (dados or "").split("=== DADOS ATUAIS ===", 1)[-1].lstrip("\n")
+    return dados
+
 def _anteriores(dados):
     """Números da análise ANTERIOR, com a mesma leitura do Motor."""
     if "DADOS DAQUELA ANÁLISE:" not in dados:
@@ -2583,6 +2614,9 @@ def _fallback_apurado(bruto, dados, indicadores, radar, segmento):
     return _texto_de_secoes(apuradas), apuradas
 
 def gerar_analise(dados, segmento, modelo=None):
+    # 🔴 CAUSA A: revisão do mesmo período não é ciclo — a defesa vem ANTES de tudo,
+    # para que Motor, giro, §2 e comparações vejam a mesma leitura já saneada.
+    dados = _neutralizar_revisao(dados)
     modos = {
         "Loja / Varejo e Moda": "🟢 MODO GIRO — foco em estoque, giro de produtos, preço, promoção e vendas rápidas.",
         "Perfumaria e Cosméticos": "🟢 MODO GIRO — foco em giro de produtos, validade, margem por categoria, preço e promoção.",

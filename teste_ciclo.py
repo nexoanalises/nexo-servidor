@@ -193,5 +193,40 @@ caso("e o estoque não aparece em nenhum lado", "estoque_valor" in av + re_, Fal
 b4 = S._leitura_mista(av, re_)
 caso("a frase não classifica o estoque", "estoque" in b4, False)
 
+
+print("\n=== 🔴 CAUSA A (14/08): REVISÃO DO MESMO PERÍODO NÃO É CICLO ===")
+# Rodar Agosto quando já existe um Agosto no histórico virava "Agosto × Agosto": tudo
+# +0%, giro entre duas fotos do mesmo mês, e o §2 conciliando "o NEXO recomendou no
+# ciclo anterior" com "esta é sua primeira análise". A defesa do Motor neutraliza o
+# predecessor quando o período dele é igual ao atual — protege o cliente 1.0.2.0 que
+# ainda não filtra na origem.
+def rev(per_ant, per_at):
+    return (f"=== ANÁLISE ANTERIOR 1 (período: {per_ant}, feita em 14/08/2026) ===\n"
+            f"DADOS DAQUELA ANÁLISE:\nfaturamento: 58.000\ncustos: 50.000\nlucro: 8.000\n"
+            f"estoque_valor: 24.000\nestoque_base: total\n"
+            f"DECISÕES RECOMENDADAS NAQUELA ANÁLISE:\n7. AÇÕES IMEDIATAS\nCriar ação de giro.\n"
+            f"=== DADOS ATUAIS ===\nperiodo: {per_at}\nfaturamento: 58.000\ncustos: 50.000\n"
+            f"lucro: 8.000\nestoque_valor: 24.000\nestoque_base: total\ncompra_mercadoria: 32.000\n")
+
+caso("detecta Agosto × Agosto", S._revisao_do_mesmo_periodo(rev("Agosto 2026", "Agosto 2026")), True)
+caso("aceita variação de grafia (Agosto/2026)", S._revisao_do_mesmo_periodo(rev("Agosto/2026", "Agosto 2026")), True)
+caso("NÃO confunde Setembro × Agosto", S._revisao_do_mesmo_periodo(rev("Agosto 2026", "Setembro 2026")), False)
+
+d = S._neutralizar_revisao(rev("Agosto 2026", "Agosto 2026"))
+caso("o bloco anterior é removido na revisão", "DADOS DAQUELA ANÁLISE:" in d, False)
+caso("§2 de ciclo não se forma (nada a comparar)", S._bloco_ciclo(d), [])
+_, radar_rev = S.calcular_motor(d)
+caso("giro não calcula entre duas fotos do mesmo mês",
+     any("ainda não calculável" in l for l in radar_rev), True)
+caso("⛔ e não publica variação +0% de faturamento",
+     any("58.000 → R$ 58.000" in l for l in radar_rev), False)
+
+# ⚠️ E o ciclo legítimo (período diferente) segue intacto.
+d_ok = S._neutralizar_revisao(rev("Agosto 2026", "Setembro 2026"))
+caso("período diferente: bloco anterior preservado", "DADOS DAQUELA ANÁLISE:" in d_ok, True)
+_, radar_ok = S.calcular_motor(d_ok)
+caso("e o giro do ciclo real continua saindo",
+     any("saiu de estoque" in l for l in radar_ok), True)
+
 print(f"\n{'='*54}\n  {ok} passaram · {falhou} falharam\n{'='*54}")
 sys.exit(1 if falhou else 0)
