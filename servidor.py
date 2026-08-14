@@ -76,6 +76,15 @@ _JANELA_SHADOW = collections.deque(maxlen=60)
 
 SHADOW_MOTOR   = os.environ.get("SHADOW_MOTOR", "1") != "0"
 SHADOW_REDACAO = os.environ.get("SHADOW_REDACAO", "") == "1"
+
+# 🔬 CAPTURA CANÔNICA — instrumento TEMPORÁRIO e BOUNDED (14/08). Desligado por padrão.
+# Quando `NEXO_CAPTURA=1`, o servidor imprime no log, para CADA análise: o `usage` real
+# de tokens de cada chamada à Groq e a resposta 1 completa do modelo (entre marcadores).
+# É como capturamos as §6+§7 reais dos payloads canônicos Agosto/Setembro para desenhar
+# a retentativa seletiva — provando, não dimensionando de cabeça.
+# ⛔ NÃO muda prompt, Motor nem fluxo decisório: só imprime. E NÃO deve ficar ligado em
+# produção com clientes reais — liga-se para os canônicos fictícios e desliga-se depois.
+CAPTURA_CANONICA = os.environ.get("NEXO_CAPTURA", "") == "1"
 try:
     SHADOW_AMOSTRA = float(os.environ.get("SHADOW_AMOSTRA", "0.25"))
 except ValueError:
@@ -3025,6 +3034,14 @@ def gerar_analise(dados, segmento, modelo=None):
 
     def _pedir(mensagens):
         r = groq_client.chat.completions.create(model=modelo_usado, messages=mensagens)
+        # 🔬 usage REAL da chamada — o número que substitui a estimativa chars/4 no
+        # cálculo do orçamento de janela. Só imprime com a captura ligada.
+        if CAPTURA_CANONICA:
+            u = getattr(r, "usage", None)
+            if u is not None:
+                print(f"CAPTURA|usage|prompt_tokens={getattr(u, 'prompt_tokens', '?')}|"
+                      f"completion_tokens={getattr(u, 'completion_tokens', '?')}|"
+                      f"total_tokens={getattr(u, 'total_tokens', '?')}")
         return _normalizar_saida(r.choices[0].message.content)
 
     def _entregar(s):
@@ -3063,6 +3080,19 @@ def gerar_analise(dados, segmento, modelo=None):
     texto1, secoes1 = _entregar(saida)
     violacoes = validar_saida(texto1, dados, indicadores, radar)
     _registrar("saida-1a-tentativa", segmento, violacoes, f"modo={MODO_VALIDADOR}")
+
+    # 🔬 CAPTURA CANÔNICA — a resposta 1 INTEIRA do modelo (o log de `_registrar` traz
+    # só o trecho, e a UI do Railway ainda o corta). Entre marcadores, para o fundador
+    # copiar o bloco fechado. Também repete fiscal|seção|trecho completo, já que agora
+    # temos o texto todo para localizar a seção. Guardado pela env var: em produção
+    # normal, nada disto imprime.
+    if CAPTURA_CANONICA:
+        print("CAPTURA-INICIO-RESPOSTA1")
+        print(saida)
+        print("CAPTURA-FIM-RESPOSTA1")
+        for x in violacoes:
+            marca = "obs" if x.get("observa") else "ativa"
+            print(f"CAPTURA|fiscal|{marca}|{x['regra']}|{x['trecho']}")
 
     # Checagem marcada observa=True entra no log e NÃO puxa retentativa — ver _viol.
     ativas = [x for x in violacoes if not x.get("observa")]
