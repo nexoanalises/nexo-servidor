@@ -139,29 +139,59 @@ for t in ["Repetir é a aposta", "mudar a abordagem", "resultado não veio"]:
 
 
 print("\n=== 🔴 O VERBO SEGUE O MOVIMENTO — NOS DOIS LADOS (14/08) ===")
-# A regra estava aplicada só ao lado RUIM: "custo e estoque que pioraram SUBIRAM, não
-# recuaram". O lado BOM herdou o defeito espelhado — custo e estoque que MELHORAM
-# CAEM, e a frase dizia que eles "avançaram".
+# A regra estava aplicada só ao lado RUIM: "custo que piorou SUBIU, não recuou". O lado
+# BOM herdou o defeito espelhado — um comparável de direção negativa que MELHORA CAI, e
+# a frase dizia que ele "avançou".
 #
-# Pego no teste dirigido da Aromática, ANTES de gastar análise real: estoque de
-# R$ 24.000 → R$ 22.000 (melhora) saía como "estoque avançaram".
+# Pego no teste dirigido da Aromática, ANTES de gastar análise real.
 #
 # ⚖️ É a lição de 13/08 outra vez: regra boa não tem lado.
-b = S._leitura_mista(["faturamento", "lucro", "estoque_valor"], ["custos"])
-caso("estoque que melhorou CAIU, não avançou", "estoque caiu" in b, True)
-caso("⛔ e não diz que ele avançou", "estoque avançaram" in b, False)
-caso("o que subiu de verdade continua avançando", "faturamento e lucro avançaram" in b, True)
+b = S._leitura_mista(["faturamento", "custos"], ["lucro"])
+caso("custo que melhorou CAIU, não avançou", "custos caíram" in b, True)
+caso("⛔ e não diz que ele avançou", "custos avançaram" in b, False)
+caso("o que subiu de verdade continua avançando", "faturamento avançou" in b, True)
+caso("e o lado ruim continua recuando", "lucro recuou" in b, True)
 
 print("\n  — e o verbo concorda com o NÚMERO GRAMATICAL, não com o tamanho da lista —")
 # "custos" e "clientes" são plurais mesmo sozinhos. Saía "enquanto custos subiu".
-caso("custos sozinho leva verbo plural", "custos subiram" in b, True)
-caso("⛔ nunca 'custos subiu'", "custos subiu," in b or b.endswith("custos subiu"), False)
-b2 = S._leitura_mista(["clientes"], ["lucro"])
+b2 = S._leitura_mista(["clientes"], ["custos"])
 caso("clientes sozinho leva verbo plural", "clientes avançaram" in b2, True)
-caso("e o singular continua singular", "lucro recuou" in b2, True)
-b3 = S._leitura_mista(["faturamento"], ["estoque_valor"])
+caso("custos sozinho leva verbo plural", "custos subiram" in b2, True)
+caso("⛔ nunca 'custos subiu'", "custos subiu" in b2, False)
+b3 = S._leitura_mista(["faturamento"], ["lucro"])
 caso("faturamento sozinho é singular", "faturamento avançou" in b3, True)
-caso("estoque que piorou SUBIU, e no singular", "estoque subiu" in b3, True)
+caso("lucro sozinho é singular", "lucro recuou" in b3, True)
+
+print("\n=== ⛔ O ESTOQUE PERDEU A VALÊNCIA (#102) — direção sim, juízo não ===")
+# 🔴 Enquanto `estoque_valor` significava ESTOQUE PARADO, `-1` era honesto: encalhe
+# caindo é bom, sem discussão. Agora significa ESTOQUE TOTAL, e a direção deixou de
+# decidir sozinha — estoque menor pode ser giro saudável OU risco de ruptura; maior
+# pode ser excesso OU preparação para um mês forte.
+#
+# ⚖️ Direção pode ser publicada; VALÊNCIA EXIGE EVIDÊNCIA ADICIONAL.
+caso("⛔ o estoque não tem mais direção declarada",
+     "estoque_valor" in S._DIRECAO_COMPARAVEL, False)
+caso("e está nomeado como sem valência, não simplesmente esquecido",
+     "estoque_valor" in S._SEM_VALENCIA, True)
+
+def classificar(ant, at):
+    return S._classificar_ciclo(at, ant)
+
+# Estoque subindo forte, e mais nada mudando: NÃO forma estado misto sozinho.
+av, re_ = classificar({"estoque_valor": 20000, "faturamento": 50000},
+                      {"estoque_valor": 24000, "faturamento": 50000})
+caso("estoque subindo sozinho não entra em nenhum dos lados", (av, re_), ([], []))
+# Estoque caindo idem — nem para o lado bom.
+av, re_ = classificar({"estoque_valor": 24000}, {"estoque_valor": 22000})
+caso("estoque caindo sozinho também não", (av, re_), ([], []))
+
+# ⚠️ E o MISTO não perde nada: forma-se com quem TEM valência definida.
+av, re_ = classificar({"faturamento": 50000, "lucro": 10000, "custos": 40000, "estoque_valor": 20000},
+                      {"faturamento": 58000, "lucro": 14000, "custos": 44000, "estoque_valor": 24000})
+caso("o misto se forma sem precisar do estoque", bool(av and re_), True)
+caso("e o estoque não aparece em nenhum lado", "estoque_valor" in av + re_, False)
+b4 = S._leitura_mista(av, re_)
+caso("a frase não classifica o estoque", "estoque" in b4, False)
 
 print(f"\n{'='*54}\n  {ok} passaram · {falhou} falharam\n{'='*54}")
 sys.exit(1 if falhou else 0)

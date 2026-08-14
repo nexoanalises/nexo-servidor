@@ -394,10 +394,14 @@ CAMPOS_COMPARAVEIS = (
 CAMPOS_RATEIO = ("proporcao_loja", "proporcao_pet", "proporcao_assistencia")
 
 # A PREOCUPAÇÃO DECLARADA (#088) → a grandeza que o Motor já apura para ela.
-# O sinal diz o que é MELHORA: faturamento, lucro e clientes sobem; custos e estoque
-# parado descem. Serve para publicar o FATO ao lado da declaração — nunca para julgar
-# se o lojista escolheu "certo". "Outro" não entra: sem grandeza definida, não há
-# comparação honesta a fazer, e inventar uma seria arbitrar.
+# Serve para publicar o FATO ao lado da declaração — nunca para julgar se o lojista
+# escolheu "certo". "Outro" não entra: sem grandeza definida, não há comparação honesta
+# a fazer, e inventar uma seria arbitrar.
+#
+# ⚠️ O terceiro item da tupla é HERANÇA MORTA e fica documentado como tal para ninguém
+# reanimá-lo: ele é desempacotado e nunca usado — a linha publica só o movimento
+# ("subiu 20%"), sem palavra de valência. E depois do #102 ele estaria ERRADO para o
+# estoque, que passou a significar TOTAL: queda deixou de ser melhora automática.
 PREOCUPACOES = {
     "vendas":   ("faturamento",   "o faturamento",         +1),
     "lucro":    ("lucro",         "o lucro",               +1),
@@ -1068,12 +1072,33 @@ _LEITURA_CICLO = {
 # ⛔ RESULTADO MISTO NÃO É RESULTADO QUE NÃO VEIO.
 
 # Direção de cada comparável: para onde ele precisa ir para ser "melhor".
+#
+# ⚠️ SÓ ENTRA AQUI O QUE TEM VALÊNCIA DEFINIDA NO CONTRATO. Faturamento maior é melhor
+# porque a definição do indicador diz isso, não porque parece. Custo maior é pior pela
+# mesma razão. Onde a valência depende de evidência que o NEXO não tem, o campo fica
+# FORA e é apenas descrito.
 _DIRECAO_COMPARAVEL = {
     "faturamento": +1, "lucro": +1, "ticket_medio": +1, "clientes": +1,
     "conversao": +1,
-    # Custo e estoque subindo é PIOR: mais capital parado, mais dinheiro saindo.
-    "custos": -1, "estoque_valor": -1,
+    # Custo subindo é PIOR: mais dinheiro saindo para produzir a mesma venda.
+    "custos": -1,
 }
+
+# 🔴 O ESTOQUE PERDEU A VALÊNCIA EM 14/08 — consequência direta do #102.
+#
+# Enquanto `estoque_valor` significava ESTOQUE PARADO, `-1` era honesto: encalhe
+# caindo é bom, sem discussão. Agora o campo significa ESTOQUE TOTAL, e a direção
+# deixou de decidir sozinha:
+#
+#   · estoque menor pode ser GIRO SAUDÁVEL — ou RISCO DE RUPTURA;
+#   · estoque maior pode ser EXCESSO — ou preparação legítima para um mês forte.
+#
+# ⚖️ Direção pode ser publicada; VALÊNCIA EXIGE EVIDÊNCIA ADICIONAL. O Motor continua
+# dizendo "Valor do estoque: R$ 24.000 → R$ 22.000 (−8,3%)" pela linha comparativa —
+# o que ele não faz mais é usar essa queda para pôr o estoque no lado bom do estado
+# misto. E o MISTO não perde nada com isso: ele se forma com os comparáveis cuja
+# valência ESTÁ definida, sem precisar fabricar valência para existir.
+_SEM_VALENCIA = ("estoque_valor",)
 
 _ROTULO_COMPARAVEL = {
     "faturamento": "faturamento", "lucro": "lucro", "ticket_medio": "ticket",
@@ -1164,7 +1189,11 @@ def _leitura_mista(avancaram, recuaram, chave="sim"):
 
 
 def _classificar_ciclo(a, ant):
-    """Devolve (avancaram, recuaram) entre os comparáveis que existem nos dois períodos."""
+    """Devolve (avancaram, recuaram) entre os comparáveis que existem nos dois períodos.
+
+    ⛔ Percorre só o `_DIRECAO_COMPARAVEL` — quem está no `_SEM_VALENCIA` nunca entra
+    em nenhum dos dois lados. Não é omissão: é a recusa de transformar direção em
+    juízo onde a evidência não existe."""
     avancaram, recuaram = [], []
     for campo, direcao in _DIRECAO_COMPARAVEL.items():
         atual, anterior = a.get(campo), ant.get(campo)

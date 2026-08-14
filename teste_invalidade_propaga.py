@@ -297,7 +297,13 @@ avanc, recu = S._classificar_ciclo(S._atuais(CICLO),
                                     (l.split(":", 1) for l in A_ANT.strip().split("\n"))})
 caso("quatro medidas avançaram", sorted(avanc),
      ["clientes", "conversao", "faturamento", "ticket_medio"])
-caso("três pioraram", sorted(recu), ["custos", "estoque_valor", "lucro"])
+# 🔴 ERAM TRÊS ATÉ 14/08. O estoque saiu da classificação com o #102: enquanto
+# `estoque_valor` significava ESTOQUE PARADO, pôr o aumento no lado ruim era honesto —
+# encalhe subindo é ruim, sem discussão. Agora significa ESTOQUE TOTAL, e subir pode
+# ser excesso OU preparação legítima para um mês forte.
+# ⚖️ Direção continua publicada na linha comparativa; VALÊNCIA exige evidência.
+caso("dois pioraram — o estoque não é mais classificado", sorted(recu), ["custos", "lucro"])
+caso("⛔ e o estoque não foi para o lado bom tampouco", "estoque_valor" in avanc, False)
 frase = S._leitura_mista(avanc, recu)
 caso("a leitura declara MISTOS", "MISTOS" in frase, True)
 caso("⛔ e NÃO diz que o resultado não veio", "não veio" in frase, False)
@@ -305,9 +311,11 @@ caso("⛔ e NÃO diz que o resultado não veio", "não veio" in frase, False)
 # "você executou" ATRIBUI o movimento às ações.
 caso("preserva causalidade explicitamente",
      "não atribui essas variações às ações" in frase, True)
-# ⚠️ Verbo segue o MOVIMENTO: custo e estoque que pioraram SUBIRAM.
-caso("custos e estoque SOBEM, não recuam",
-     "custos e estoque subiram" in frase, True)
+# ⚠️ Verbo segue o MOVIMENTO: o custo que piorou SUBIU, não recuou. E "custos" leva
+# verbo plural mesmo sozinho na frase.
+caso("o custo SOBE, não recua", "custos subiram" in frase, True)
+caso("⛔ e o estoque não é mencionado como bom nem como ruim",
+     "estoque" in frase, False)
 
 print("  — ② mandar mudar e repetir a mesma ação —")
 RUIM = ("2. O CICLO ANTERIOR\nVocê executou e o resultado não veio. O caminho não é "
