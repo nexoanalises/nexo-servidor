@@ -238,5 +238,70 @@ tudo = "\n".join(ind_a + rad_a)
 caso("⛔ o rótulo 'Estoque parado' não sai mais do Motor", "Estoque parado" in tudo, False)
 caso("⛔ nem em minúscula, na linha da preocupação", "o estoque parado" in tudo, False)
 
+
+print("\n=== 🔴 RODADA 2 (14/08): SE JULHO NÃO SERVE PARA O GIRO, NÃO SERVE PARA A VARIAÇÃO ===")
+# A contradição que o fundador achou no relatório real. O Radar declarava, com todas as
+# letras, que o estoque de julho NÃO tem natureza garantida — "misturar daria um número
+# errado" — e três linhas abaixo o §2 publicava "Valor do estoque: R$ 20.000 →
+# R$ 24.000 (+20%)". Mesmo número, mesma natureza desconhecida, mesmo par de períodos.
+#
+# ⚖️ Exceção do #099 inteira: falha determinística, dependência explícita, e a saída
+# contradiz um fato que o próprio NEXO já publicou. Por isso BLOQUEIA, não observa.
+def par(base_ant, base_at):
+    ant = "faturamento: 50.000\ncustos: 40.000\nlucro: 10.000\nestoque_valor: 20.000\n"
+    if base_ant: ant += "estoque_base: total\n"
+    at = ("faturamento: 58.000\ncustos: 50.000\nlucro: 8.000\nestoque_valor: 24.000\n"
+          "compra_mercadoria: 32.000\n")
+    if base_at: at += "estoque_base: total\n"
+    return ("=== ANÁLISE ANTERIOR 1 (período: Julho 2026) ===\nDADOS DAQUELA ANÁLISE:\n" + ant +
+            "DECISÕES RECOMENDADAS NAQUELA ANÁLISE:\nnada\n=== DADOS ATUAIS ===\n" + at)
+
+def tem_comparacao(d):
+    ind, _ = S.calcular_motor(d)
+    return any(l.startswith("Valor do estoque:") for l in ind)
+
+caso("⛔ sem critério em julho: a comparação NÃO é publicada", tem_comparacao(par(False, True)), False)
+caso("⛔ sem critério no atual: idem", tem_comparacao(par(True, False)), False)
+caso("com critério nas duas pontas: a comparação volta", tem_comparacao(par(True, True)), True)
+
+print("\n  — e a linha da PREOCUPAÇÃO faz a mesma conta, no mesmo par —")
+def preoc(d):
+    _, radar = S.calcular_motor(d + "preocupacao: estoque\n")
+    linha = next((l for l in radar if "preocupação declarada" in l), "")
+    return "valor do estoque" in linha
+caso("⛔ sem critério: a preocupação não publica variação de estoque",
+     preoc(par(False, True)), False)
+caso("com critério: publica", preoc(par(True, True)), True)
+
+print("\n  — 🔒 e o FISCAL, porque o modelo tem os dois números crus e sabe subtrair —")
+# Tirar a linha do Radar não impede a frase de nascer na prosa: os dois valores estão
+# no payload, um em cada bloco de período.
+d_ruim = par(False, True)
+ind_r, rad_r = S.calcular_motor(d_ruim)
+def bloqueia(txt):
+    vs = S.validar_saida("4. O QUE ESTÁ TE FAZENDO PERDER DINHEIRO\n" + txt + "\n",
+                         d_ruim, ind_r, rad_r)
+    return [x for x in vs if x["regra"] == "variação de estoque entre naturezas incompatíveis"
+            and not x.get("observa")] != []
+for frase, esp in [
+    ("O estoque subiu de R$ 20.000 para R$ 24.000 no período.", True),
+    ("O estoque aumentou 20% em relação ao mês anterior.", True),
+    ("A variação de estoque foi de R$ 4.000.", True),
+    ("O estoque caiu R$ 2.000 desde a última análise.", True),
+    # ⚠️ O valor de HOJE continua livre: esse número é do período atual e tem natureza
+    # declarada. A trava é sobre COMPARAR duas pontas, não sobre citar uma.
+    ("O estoque hoje é de R$ 24.000.", False),
+    ("Há perfumes encalhados há cerca de 3 meses.", False),
+]:
+    caso(f"{'BLOQUEIA' if esp else 'passa'}: {frase[:50]}", bloqueia(frase), esp)
+
+print("\n  — ⚠️ e com as duas pontas declaradas, a trava não atrapalha —")
+d_bom = par(True, True)
+ind_b, rad_b = S.calcular_motor(d_bom)
+vs = S.validar_saida("4. O QUE ESTÁ TE FAZENDO PERDER DINHEIRO\nO estoque subiu de "
+                     "R$ 20.000 para R$ 24.000 no período.\n", d_bom, ind_b, rad_b)
+caso("comparação legítima não é bloqueada",
+     any(x["regra"] == "variação de estoque entre naturezas incompatíveis" for x in vs), False)
+
 print(f"\n{'='*62}\n  {ok} passaram · {falhou} falharam\n{'='*62}")
 sys.exit(1 if falhou else 0)

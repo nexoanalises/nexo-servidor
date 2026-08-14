@@ -1461,9 +1461,23 @@ def calcular_motor(dados):
     # errava (declarou "a capacidade ficou igual" com 65% → 70% nos dados).
     # Campo percentual se compara em PONTOS, não em porcentagem: 33% → 35% é
     # +2 pontos, não "+2". A conta é diferente e a leitura também.
+    # 🔴 A CONTRADIÇÃO DETERMINÍSTICA DA RODADA 2 (14/08). O Radar declarava, com todas
+    # as letras, que o estoque de julho NÃO tem natureza garantida — "antes o campo
+    # pedia só o que estava parado; misturar daria um número errado" — e três linhas
+    # abaixo o §2 publicava "Valor do estoque: R$ 20.000 → R$ 24.000 (+20%)".
+    #
+    # ⛔ SE JULHO NÃO SERVE PARA O GIRO, NÃO SERVE PARA A VARIAÇÃO. É o mesmo número,
+    # com a mesma natureza desconhecida, no mesmo par de períodos. Publicar a segunda
+    # é contradizer o que o próprio produto acabou de invalidar.
+    #
+    # ⚖️ Por isso NÃO é observação: é a exceção do #099 — falha determinística,
+    # dependência explícita, e a saída contradiz um fato que o NEXO já declarou.
+    base_par_ok = _base_estoque(_bloco_atual(dados)) and _base_estoque(_bloco_anterior(dados))
     for chave, nome, tipo in CAMPOS_COMPARAVEIS:
         a, b = atual.get(chave), ant.get(chave)
         if a is None or not b:
+            continue
+        if chave == "estoque_valor" and not base_par_ok:
             continue
         if tipo == "percentual":
             pontos = a - b
@@ -1688,6 +1702,11 @@ def calcular_motor(dados):
         if alvo:
             campo, rotulo, sentido = alvo
             a, b = atual.get(campo), ant.get(campo)
+            # ⛔ MESMO PAR, MESMA NATUREZA DESCONHECIDA. Nesta rodada a preocupação era
+            # LUCRO e a linha não apareceu — mas com "estoque" declarado ela faria
+            # exatamente a variação que o Radar acabou de declarar impossível.
+            if campo == "estoque_valor" and not base_par_ok:
+                a = None
             if a is not None and b:
                 delta = (a - b) / abs(b) * 100
                 if _pct_sao(delta) and abs(delta) >= 0.1:
@@ -1995,6 +2014,18 @@ _FALTA_IMPACTO = re.compile(
     r"custou|comeu|tirou)\b", re.I)
 
 # Juízo sobre a QUALIDADE da compra. Nenhum campo mede se a compra foi acertada.
+# Variação de estoque ENTRE PERÍODOS: "de R$ 20.000 para R$ 24.000", "subiu 20%",
+# "aumentou R$ 4.000". ⚠️ Só o que compara duas pontas — dizer o valor de hoje ("o
+# estoque é de R$ 24.000") continua livre, porque esse número é do período atual e tem
+# natureza declarada.
+_VARIACAO_ESTOQUE = re.compile(
+    r"\bestoque\b" + _MESMA_FRASE + r"{0,90}?"
+    r"(de R\$ ?[\d.,]+ (para|a) R\$ ?[\d.,]+|"
+    r"(subiu|aumentou|cresceu|caiu|diminuiu|reduziu|recuou)" + _MESMA_FRASE + r"{0,20}?"
+    r"(\d[\d.,]*\s*%|R\$ ?[\d.,]+)|→)|"
+    r"(varia[çc][ãa]o|aumento|queda|crescimento|redu[çc][ãa]o)( d[eo])? estoque",
+    re.I)
+
 # 🔴 ESTOQUE VIRANDO PERDA — o que o prompt ensinava até 14/08 e o modelo repetiu
 # VERBATIM: "o estoque parado de R$ 20.000 também é um dinheiro que já foi gasto e não
 # voltou". ⛔ Exige a vizinhança das duas ideias na MESMA frase, e deixa passar a perda
@@ -2136,6 +2167,27 @@ def validar_saida(saida, dados, indicadores, radar):
                                    f"'{alvo}' foi declarado como item PARADO/baixa saída; "
                                    f"dizer que ele pode faltar ou precisa de reposição "
                                    f"inverte a decisão", linha))
+
+    # 0j · 🔴 VARIAÇÃO DE ESTOQUE ENTRE NATUREZAS INCOMPATÍVEIS — e esta BLOQUEIA.
+    #
+    # O Motor parou de publicar a comparação, mas os DOIS valores crus continuam no
+    # payload (um em cada bloco de período) e o modelo sabe subtrair. Tirar a linha do
+    # Radar não impede a frase de nascer na prosa.
+    #
+    # ⚖️ Exceção do #099, e ela se aplica inteira: a falha é DETERMINÍSTICA (ou o
+    # `estoque_base` está declarado nas duas pontas, ou não está), a dependência é
+    # EXPLÍCITA (a variação depende das duas pontas terem a mesma natureza), e a saída
+    # CONTRADIZ um fato que o próprio NEXO já publicou no Radar — "misturar daria um
+    # número errado". Não há o que discutir, então não se observa: bloqueia.
+    if not _base_estoque(_bloco_atual(dados)) or not _base_estoque(_bloco_anterior(dados)):
+        for linha in (saida or "").split("\n"):
+            if linha.strip() in {l.strip() for l in (radar or [])}:
+                continue
+            if _VARIACAO_ESTOQUE.search(linha):
+                v.append(_viol("variação de estoque entre naturezas incompatíveis",
+                               "o Radar já declarou que os dois períodos não foram "
+                               "informados pelo mesmo critério — a mesma razão que "
+                               "impede o giro impede a variação", linha))
 
     # 0i · 🟡 FATO REQUALIFICADO EM PERDA — a retaguarda das duas correções de 14/08.
     #

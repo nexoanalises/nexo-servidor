@@ -37,11 +37,16 @@ def caso(t, obtido, esperado):
     if not b: print(f"         obtido={obtido!r}\n         esperado={esperado!r}")
     ok, falhou = ok+b, falhou+(not b)
 
-def payload(preocupacao=None, atuais=None, anteriores=None):
+# 🔴 `estoque_base: total` nas DUAS pontas desde 14/08. Sem ele, `estoque_valor` não é
+# comparável entre períodos — a mesma razão que impede o giro. Ver o caso da transição
+# no fim do arquivo, que prova a supressão.
+def payload(preocupacao=None, atuais=None, anteriores=None, base=True):
     a = {"faturamento": 68000, "custos": 52000, "lucro": 16000,
          "estoque_valor": 22000, "clientes": 440, "compra_mercadoria": 20000}
     b = {"faturamento": 60000, "custos": 48000, "lucro": 12000,
          "estoque_valor": 30000, "clientes": 420, "compra_mercadoria": 18000}
+    if base:
+        a["estoque_base"] = b["estoque_base"] = "total"
     a.update(atuais or {}); b.update(anteriores or {})
     def bloco(d):
         return "".join(f"{k}: {v}\n" for k, v in d.items())
@@ -132,6 +137,22 @@ caso("instrução de lente de coleta está no prompt",
      "LENTE DE COLETA, NÃO DIAGNÓSTICO" in src, True)
 caso("e proíbe abrir o diagnóstico repetindo a preocupação",
      "PROIBIDO abrir o diagnóstico repetindo a preocupação declarada" in src, True)
+
+
+print("\n=== ⛔ E A PREOCUPAÇÃO NÃO ESCAPA DA TRAVA DE NATUREZA (14/08) ===")
+# O lojista declara ESTOQUE, e esta linha faz exatamente a variação entre os dois
+# períodos. Se as naturezas não são comparáveis — a mesma razão que impede o giro —
+# ela também não pode sair. Foi a contradição da Rodada 2: o Radar declarava o par
+# inutilizável e o §2 publicava "+20%" logo abaixo.
+sem = linha(payload("Estoque", base=False))
+caso("a linha da preocupação continua existindo", sem is not None, True)
+caso("⛔ mas SEM a variação do estoque", "caiu" in (sem or "") or "subiu" in (sem or ""), False)
+caso("e ainda declara que o diagnóstico segue os números",
+     "segue os números apurados" in (sem or ""), True)
+# ⚠️ Outras grandezas não são afetadas: só o estoque tem natureza em transição.
+lucro_sem = linha(payload("Lucro", base=False))
+caso("preocupação com LUCRO publica a variação normalmente",
+     "subiu 33,3%" in (lucro_sem or ""), True)
 
 print(f"\n{'='*54}\n  {ok} passaram · {falhou} falharam\n{'='*54}")
 sys.exit(1 if falhou else 0)
