@@ -10,6 +10,7 @@ import os
 import sys
 import hmac
 import uuid
+import tempfile
 import collections
 import json
 import unicodedata
@@ -85,6 +86,20 @@ SHADOW_REDACAO = os.environ.get("SHADOW_REDACAO", "") == "1"
 # ⛔ NÃO muda prompt, Motor nem fluxo decisório: só imprime. E NÃO deve ficar ligado em
 # produção com clientes reais — liga-se para os canônicos fictícios e desliga-se depois.
 CAPTURA_CANONICA = os.environ.get("NEXO_CAPTURA", "") == "1"
+# Grava em ARQUIVO, não em memória: o gunicorn roda com --workers 2 e memória é
+# por-worker (a GET pegaria o worker errado). Um arquivo em /tmp é compartilhado pelos
+# workers do mesmo container. Efêmero — some no redeploy, que é o que queremos.
+CAPTURA_ARQUIVO = os.path.join(tempfile.gettempdir(), "nexo_captura.txt")
+
+def _cap_arquivo(texto):
+    """Append à captura em arquivo. Guardada pela env var e NUNCA derruba a análise."""
+    if not CAPTURA_CANONICA:
+        return
+    try:
+        with open(CAPTURA_ARQUIVO, "a", encoding="utf-8") as f:
+            f.write(texto)
+    except Exception:                                            # noqa: BLE001
+        pass
 try:
     SHADOW_AMOSTRA = float(os.environ.get("SHADOW_AMOSTRA", "0.25"))
 except ValueError:
@@ -3039,9 +3054,11 @@ def gerar_analise(dados, segmento, modelo=None):
         if CAPTURA_CANONICA:
             u = getattr(r, "usage", None)
             if u is not None:
-                print(f"CAPTURA|usage|prompt_tokens={getattr(u, 'prompt_tokens', '?')}|"
-                      f"completion_tokens={getattr(u, 'completion_tokens', '?')}|"
-                      f"total_tokens={getattr(u, 'total_tokens', '?')}")
+                linha = (f"CAPTURA|usage|prompt_tokens={getattr(u, 'prompt_tokens', '?')}|"
+                         f"completion_tokens={getattr(u, 'completion_tokens', '?')}|"
+                         f"total_tokens={getattr(u, 'total_tokens', '?')}")
+                print(linha)
+                _cap_arquivo(linha + "\n")
         return _normalizar_saida(r.choices[0].message.content)
 
     def _entregar(s):
@@ -3090,9 +3107,14 @@ def gerar_analise(dados, segmento, modelo=None):
         print("CAPTURA-INICIO-RESPOSTA1")
         print(saida)
         print("CAPTURA-FIM-RESPOSTA1")
+        bloco = [f"\n{'='*64}\nSEGMENTO: {segmento}\n{'='*64}\n",
+                 "--- RESPOSTA 1 (texto do modelo, antes de qualquer correção) ---\n",
+                 saida, "\n\n--- FISCAIS QUE DISPARARAM ---\n"]
         for x in violacoes:
-            marca = "obs" if x.get("observa") else "ativa"
+            marca = "obs" if x.get("observa") else "ATIVA"
             print(f"CAPTURA|fiscal|{marca}|{x['regra']}|{x['trecho']}")
+            bloco.append(f"[{marca}] {x['regra']} :: {x['trecho']}\n")
+        _cap_arquivo("".join(bloco))
 
     # Checagem marcada observa=True entra no log e NÃO puxa retentativa — ver _viol.
     ativas = [x for x in violacoes if not x.get("observa")]
@@ -3420,6 +3442,36 @@ def optin():
         resp = jsonify({"status": "erro", "motivo": "falha no cadastro"})
         resp.status_code = 502
         return _optin_cors(resp)
+
+@app.route("/captura", methods=["GET"])
+def captura_ver():
+    """🔬 A captura canônica em TEXTO PURO, para copiar do navegador — em vez de caçar
+    linha a linha no log do Railway. Mesma proteção do laboratório: 404 sem o token.
+
+    Aceita o token no header X-Lab-Token OU em ?token= (o navegador não manda header
+    fácil). `?limpar=1` zera o arquivo para começar uma coleta nova, isolada.
+    ⛔ Só LÊ o que a captura já gravou; não roda análise, não toca estado nenhum."""
+    tok = request.headers.get("X-Lab-Token", "") or request.args.get("token", "")
+    if not LAB_TOKEN or not hmac.compare_digest(tok, LAB_TOKEN):
+        return jsonify({"status": "erro", "motivo": "rota inativa"}), 404
+    plain = {"Content-Type": "text/plain; charset=utf-8"}
+    if request.args.get("limpar") == "1":
+        try:
+            os.remove(CAPTURA_ARQUIVO)
+        except FileNotFoundError:
+            pass
+        except Exception as e:                                   # noqa: BLE001
+            return f"erro ao limpar: {e}", 500, plain
+        return "captura zerada — rode os canônicos e recarregue esta URL sem ?limpar", 200, plain
+    if not CAPTURA_CANONICA:
+        return ("captura DESLIGADA. Defina NEXO_CAPTURA=1 nas Variables, faça Deploy, "
+                "rode as análises e recarregue."), 200, plain
+    try:
+        with open(CAPTURA_ARQUIVO, encoding="utf-8") as f:
+            return (f.read() or "arquivo vazio — nenhuma análise capturada ainda"), 200, plain
+    except FileNotFoundError:
+        return "nada capturado ainda — rode uma análise com a captura ligada", 200, plain
+
 
 @app.route("/laboratorio", methods=["GET"])
 def laboratorio_janela():
