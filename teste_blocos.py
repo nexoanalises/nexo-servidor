@@ -84,14 +84,16 @@ caso("declara a ausencia, nao inventa", "não informou meta" in sm, True)
 print("\n=== _bloco_metas — com estoque lido ===")
 ce = "\n".join(S._bloco_metas(JUNHO.replace(
     "saindo devagar.", "saindo devagar, tem R$ 13.000 a preco de custo parados.")))
-# O ALVO PASSOU A SER NUMÉRICO em 10/08. A redação antiga ("para menos da metade")
-# reprovava na checagem 2 do próprio validador, que exige "de [atual] para [alvo]" com
-# os dois números — e como esta linha é escrita por código e reposta a cada tentativa,
-# o modelo não tinha como consertar: a análise caía no fallback toda vez que houvesse
-# valor de estoque. Ficou latente enquanto a cifra vinha do texto livre; virou
-# permanente com o `estoque_valor` estruturado (#088).
-caso("meta de estoque aparece rotulada, com alvo numérico",
-     "de R$ 13.000 para R$ 6.500" in ce and "sugerida pelo NEXO" in ce, True)
+# 🔴 A META DE ESTOQUE SAIU EM 14/08 — e com ela some o problema que este caso
+# perseguia desde 10/08. Ela nasceu com alvo em texto ("para menos da metade"),
+# reprovava na checagem 2 e derrubava a análise no fallback; virou alvo numérico
+# ("para R$ 6.500") e passou a reprovar por outro motivo, agora do fundador: metade
+# é uma conta, não uma decisão. Não existe régua calibrada que autorize cortar 50%
+# do estoque num ciclo.
+#
+# ⚖️ ALVO SEM RÉGUA NÃO VIRA META — a lei da trava ⓑ no eixo do alvo.
+caso("⛔ nenhuma meta de estoque é fabricada a partir da cifra",
+     "R$ 6.500" in ce or "metade do estoque" in ce, False)
 
 print("\n=== _substituir_secao com o bloco de metas ===")
 sec = S._em_secoes(SAIDA_REAL)

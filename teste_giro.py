@@ -36,20 +36,31 @@ def caso(t, obtido, esperado):
     if not b: print(f"         obtido={obtido!r}\n         esperado={esperado!r}")
     ok, falhou = ok+b, falhou+(not b)
 
+# 🔴 `base` MUDOU EM 14/08. O giro exige que os DOIS períodos declarem `estoque_base:
+# total` — a natureza do número, dita pela versão do app que o coletou. Até então a
+# dica do campo pedia "o que está PARADO hoje" e a identidade `inicial + compras −
+# final` exige o TOTAL: quem obedeceu a dica mandou encalhe, e o giro do ciclo seguinte
+# o consumiria como se fosse o estoque inteiro. O padrão aqui é `True` porque este
+# arquivo testa o contrato VIGENTE; a transição tem casos próprios no fim.
 def payload(estoque_atual=None, compra=None, estoque_anterior=None, com_anterior=True,
-            texto_estoque_atual="descrição qualquer", texto_estoque_anterior="descrição"):
+            texto_estoque_atual="descrição qualquer", texto_estoque_anterior="descrição",
+            base_atual=True, base_anterior=True):
     atual = "Segmento: Loja / Varejo e Moda\nnome_negocio: Loja da Bia\n"
     atual += "faturamento: 56350\ncustos: 46900\nlucro: 9450\n"
     if compra is not None:
         atual += f"compra_mercadoria: {compra}\n"
     if estoque_atual is not None:
         atual += f"estoque_valor: {estoque_atual}\n"
+    if base_atual:
+        atual += "estoque_base: total\n"
     atual += f"estoque: {texto_estoque_atual}\n"
     if not com_anterior:
         return atual
     ant = "faturamento: 50000\ncustos: 40000\nlucro: 8000\n"
     if estoque_anterior is not None:
         ant += f"estoque_valor: {estoque_anterior}\n"
+    if base_anterior:
+        ant += "estoque_base: total\n"
     ant += f"estoque: {texto_estoque_anterior}\n"
     return ("=== ANÁLISE ANTERIOR 1 (período: Julho/2026) ===\n"
             f"DADOS DAQUELA ANÁLISE:\n{ant}"
@@ -110,7 +121,10 @@ ind, _ = S.calcular_motor(payload(
     estoque_atual=12000, compra=5000, estoque_anterior=10000,
     texto_estoque_atual="tem uns R$ 30.000 encalhados, seria bom vender",
     texto_estoque_anterior="tinha bem menos, uns R$ 3.000"))
-comp = next((l for l in ind if l.startswith("Estoque parado:")), None)
+# 🔴 O RÓTULO MUDOU EM 14/08: `estoque_valor` passou a significar estoque TOTAL, e
+# chamá-lo de "parado" era o Motor atribuindo ao dado uma natureza que a coleta não
+# garantia. Total ≠ encalhado.
+comp = next((l for l in ind if l.startswith("Valor do estoque:")), None)
 caso("comparação simples existe (via CAMPOS_COMPARAVEIS)", comp is not None, True)
 caso("usa o declarado do período anterior (10.000), não o da prosa (3.000)",
      "10.000" in (comp or ""), True)
@@ -148,14 +162,21 @@ caso("nenhuma violação ATIVA no que o código publica — senão a análise ca
      [x["regra"] for x in S.validar_saida(saida_publicada, d_ok, ind_r, radar_r)
       if not x.get("observa")], [])
 
-print("\n=== a meta de estoque escreve alvo NUMÉRICO (régua da checagem 2) ===")
-linha_meta = next((l for l in metas if "Estoque parado" in l), None)
-caso("a meta existe", linha_meta is not None, True)
-caso("parte de R$ 22.000", "de R$ 22.000" in (linha_meta or ""), True)
-caso("e chega a R$ 11.000, metade — não 'menos da metade'",
-     "para R$ 11.000" in (linha_meta or ""), True)
-caso("com a procedência declarada (#082)",
-     "sugerida pelo NEXO" in (linha_meta or ""), True)
+print("\n=== ⛔ a meta de METADE DO ESTOQUE não existe mais ===")
+# 🔴 SAIU EM 14/08, por veredito do fundador. "De R$ 22.000 para R$ 11.000 — metade do
+# estoque que você informou" tem matemática correta e decisão nenhuma: não há régua
+# calibrada que autorize cortar 50% do estoque num ciclo. Dividir por dois não era
+# análise, era a única conta possível com um número só.
+#
+# ⚖️ É a lei da trava ⓑ no outro eixo — indicador sem benchmark não vira juízo; ALVO
+# SEM RÉGUA NÃO VIRA META. E era pior que o modelo escrevendo: saía por CÓDIGO, dentro
+# da seção que leva o selo "apurado".
+caso("nenhuma meta de estoque é fabricada",
+     any("stoque" in l for l in metas), False)
+caso("e nenhuma linha divide o estoque pela metade",
+     any("11.000" in l for l in metas), False)
+# ⚠️ O que continua de pé: as metas que NASCEM do dado seguem publicadas.
+caso("as metas do dado continuam existindo", len(metas) > 0, True)
 
 print("\n=== estoque_valor entrou em CAMPOS_CRITICOS: preenchimento ilegível avisa ===")
 d_ilegivel = payload(estoque_atual="não sei ao certo", compra=5000, estoque_anterior=30000)

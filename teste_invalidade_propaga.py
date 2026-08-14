@@ -271,12 +271,16 @@ caso("com período anterior, variação é permitida",
 print("\n=== 10. AS TRÊS REGRESSÕES DO SEGUNDO CICLO (13/08) ===")
 # 🔴 Segundo ciclo do "Celular Legal". Faturamento +10%, ticket +13,3%, clientes
 # +36,8%, conversão +15 pontos — e lucro −6,7%, custos +15,6%, estoque +50%.
+# 🔴 `estoque_base: total` nas DUAS pontas — exigência que entrou em 14/08. Sem ela o
+# giro se abstém, porque até então a dica do campo pedia "o que está PARADO hoje"
+# enquanto a identidade `inicial + compras − final` exige o TOTAL. Aqui os dois
+# períodos declaram o critério novo, que é o contrato que este bloco testa.
 A_ANT = ("faturamento: 60.000\ncustos: 45.000\nlucro: 15.000\nticket_medio: 450\n"
          "clientes: 380\nconversao: 30\nestoque_valor: 12.000\n"
-         "compra_mercadoria: 38.000\n")
+         "estoque_base: total\ncompra_mercadoria: 38.000\n")
 A_AT = ("faturamento: 66.000\nmeta: 70.000\ncustos: 52.000\nlucro: 14.000\n"
         "ticket_medio: 510\nclientes: 520\nconversao: 45\nestoque_valor: 18.000\n"
-        "compra_mercadoria: 40.000\nacoes_executadas: Sim, todas\n"
+        "estoque_base: total\ncompra_mercadoria: 40.000\nacoes_executadas: Sim, todas\n"
         "acoes_quais: girei os encalhados\n")
 ACAO_ANTERIOR = ("Criar uma ação de giro para os aparelhos encalhados nos próximos 30 "
                  "dias, definindo o desconto somente após verificar o custo, preço "

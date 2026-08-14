@@ -384,7 +384,7 @@ CAMPOS_COMPARAVEIS = (
     ("fornecedores", "Fornecedores no prazo",    "percentual"),
     ("agenda_ocupacao", "Ocupação da agenda",    "percentual"),
     ("recorrentes",  "Clientes recorrentes",     "quantidade"),
-    ("estoque_valor", "Estoque parado",          "dinheiro"),
+    ("estoque_valor", "Valor do estoque",        "dinheiro"),
 )
 
 # SÓ estes campos são RATEIO — a soma deles tem de fechar 100%. Rodar a conferência
@@ -401,7 +401,7 @@ CAMPOS_RATEIO = ("proporcao_loja", "proporcao_pet", "proporcao_assistencia")
 PREOCUPACOES = {
     "vendas":   ("faturamento",   "o faturamento",         +1),
     "lucro":    ("lucro",         "o lucro",               +1),
-    "estoque":  ("estoque_valor", "o estoque parado",      -1),
+    "estoque":  ("estoque_valor", "o valor do estoque",    -1),
     "clientes": ("clientes",      "o número de clientes",  +1),
     # "o custo total" e não "os custos": o verbo da frase é sempre singular
     # ("subiu"/"caiu"), e "os custos subiu" ia sair no Radar do cliente.
@@ -911,10 +911,18 @@ def _bloco_metas(dados):
     # ponto de partida). Ficou latente enquanto a cifra do estoque dependia de o
     # cliente escrevê-la no texto livre; com `estoque_valor` estruturado (#088) passou
     # a valer para TODA análise com estoque preenchido.
-    v_est = _valor_estoque(dados)[0]
-    if v_est:
-        linhas.append(f"• Estoque parado: de R$ {_fmt_rs(v_est)} para R$ {_fmt_rs(v_est / 2)} "
-                      f"— meta sugerida pelo NEXO, metade do estoque que você informou.")
+    # 🔴 A META DE METADE DO ESTOQUE SAIU EM 14/08. "De R$ 20.000 para R$ 10.000 — metade
+    # do estoque que você informou" tem matemática correta e decisão nenhuma: não existe
+    # régua calibrada que autorize reduzir 50% do estoque num ciclo. Dividir por dois não
+    # é análise, é a única conta que dava para fazer com um número só.
+    #
+    # ⚖️ É a lei da trava ⓑ no outro eixo — indicador sem benchmark não vira juízo; ALVO
+    # SEM RÉGUA NÃO VIRA META. E aqui era PIOR que o modelo escrevendo: sai por código,
+    # dentro da seção que leva o selo "apurado".
+    #
+    # 🚪 O que destrava: uma régua de cobertura declarada (quantos meses de venda um
+    # estoque deve cobrir naquele ramo). Com ela, o alvo nasce do dado. Sem ela, o
+    # produto informa o valor e cala sobre o tamanho certo — que é o que ele sabe.
 
     if not linhas:
         return []
@@ -934,6 +942,79 @@ def _anteriores(dados):
         if corte in txt:
             txt = txt.split(corte, 1)[0]
     return {k: _num_br(v) for k, v in _campos_do_bloco(txt)[0].items()}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 🔴 A CHAVE NÃO É NOME — e o cliente leu a chave.
+#
+# Relatório da Aromática, 14/08: *"A VALIDADE RISCO do Perfume é um alerta de que
+# R$ 250,00 podem ser perdidos nos próximos 30 dias."* `validade_risco` é o nome da
+# chave; ela viajava crua dentro de DADOS DO NEGÓCIO e o modelo a costurou na frase.
+#
+# ⚠️ SEGUNDA VEZ DA MESMA CAUSA. A primeira foi o `baixa_*`, que o modelo leu como
+# FALTA e inverteu a decisão do Motorola G17. Consertamos RENOMEANDO — o que fez a
+# chave ser lida certo, mas não parou de ser lida. Renomear tratava o sintoma.
+#
+# Agora o payload continua idêntico para todo parser (o `dados` não é tocado): o que
+# muda é a CÓPIA que entra no prompt, onde cada chave estruturada vira o rótulo que o
+# lojista viu na tela. Um nome que o modelo pode escrever sem estragar a frase.
+ROTULOS_ESTRUTURADOS = {
+    "falta_ocorreu":     "Faltou algum item no período",
+    "falta_categoria":   "Tipo de item que faltou",
+    "falta_canal":       "Canal em que faltou",
+    "falta_item":        "Item que faltou",
+    "margem_melhor":     "Categoria de MELHOR margem (declarada pelo lojista)",
+    "margem_pior":       "Categoria de PIOR margem (declarada pelo lojista)",
+    "encalhe_ocorreu":   "Há produto parado/encalhado",
+    "encalhe_categoria": "Tipo de produto parado",
+    "encalhe_item":      "Item parado",
+    "validade_risco":    "Há produto próximo do vencimento",
+    "validade_item":     "Produto próximo do vencimento",
+    "validade_valor":    "Valor em risco por vencimento (R$)",
+    "validade_prazo":    "Prazo do vencimento mais próximo",
+}
+# ⛔ `estoque_base` é contrato entre app e Motor, não dado de negócio. O modelo não tem
+# o que fazer com ele, e uma linha "estoque base: total" no meio dos dados é
+# exatamente o tipo de coisa que ele acaba narrando.
+CAMPOS_INTERNOS = ("estoque_base",)
+
+def _dados_legiveis(dados):
+    """A cópia do payload que vai ao modelo, com chave trocada por rótulo.
+
+    ⚠️ NÃO altera `dados`. Todo parser — Motor, validador, shadow, `_atuais` — continua
+    lendo a chave original. Trocar o payload de verdade quebraria a precedência do
+    #097, que existe justamente para distinguir chave estruturada de campo legado."""
+    saida = []
+    for linha in (dados or "").split("\n"):
+        chave = linha.split(":", 1)[0].strip()
+        if chave in CAMPOS_INTERNOS:
+            continue
+        rotulo = ROTULOS_ESTRUTURADOS.get(chave)
+        saida.append(f"{rotulo}:{linha.split(':', 1)[1]}" if rotulo else linha)
+    return "\n".join(saida)
+
+def _bloco_atual(dados):
+    return dados.split("=== DADOS ATUAIS ===", 1)[1] if "=== DADOS ATUAIS ===" in dados else dados
+
+def _bloco_anterior(dados):
+    if "DADOS DAQUELA ANÁLISE:" not in dados:
+        return ""
+    txt = dados.split("DADOS DAQUELA ANÁLISE:", 1)[1]
+    for corte in ("DECISÕES RECOMENDADAS", "=== ANÁLISE ANTERIOR 2", "=== DADOS ATUAIS"):
+        if corte in txt:
+            txt = txt.split(corte, 1)[0]
+    return txt
+
+def _base_estoque(bloco):
+    """`estoque_valor` daquele bloco é ESTOQUE TOTAL, declarado pela versão que coletou?
+
+    Não é campo do formulário — é o app dizendo sob QUAL contrato pediu o número. Até
+    14/08 a dica pedia o que está PARADO e a identidade do giro exige o TOTAL; quem
+    obedeceu a dica mandou encalhe. Sem a declaração, a natureza é desconhecida, e
+    desconhecida não alimenta identidade contábil.
+
+    ⛔ Ausência NUNCA vira "provavelmente total". É o mesmo princípio do #099: o que
+    não está garantido não sustenta o que depende dele."""
+    return _texto_do_campo(bloco, "estoque_base").strip().lower() == "total"
 
 def _sem_tag_de_prazo(texto):
     """Tira a etiqueta (Custo: … | Resultado em: …) e a numeração da ação antiga.
@@ -1447,18 +1528,43 @@ def calcular_motor(dados):
     # não viu o número em lugar nenhum. Cifra que responde "o que parar de comprar"
     # não pode depender de o modelo lembrar dela. Mesma família de "Composição dos
     # custos" e "Caixa", que já são radar pelo mesmo motivo.
+    # 🔒 A NATUREZA TEM DE ESTAR DECLARADA NAS DUAS PONTAS. Até 14/08 a dica do campo
+    # pedia "quanto vale o que está PARADO hoje" enquanto a identidade abaixo exige o
+    # estoque TOTAL — e a dica, por ser mais específica que o rótulo, é a que o lojista
+    # obedece. Número coletado assim NÃO pode alimentar giro: seria o Motor atribuindo
+    # ao dado uma natureza diferente da que a interface induziu.
+    #
+    # ⛔ E a trava é retroativa por construção: análise gravada antes desta versão não
+    # traz `estoque_base`, então o giro se abstém até haver DUAS coletadas sob o
+    # contrato novo. Não se conserta dado velho adivinhando o que ele queria dizer.
+    base_ok = _base_estoque(_bloco_atual(dados)) and _base_estoque(_bloco_anterior(dados))
     est_final = atual.get("estoque_valor")
-    est_inicial = ant.get("estoque_valor")
+    est_inicial = ant.get("estoque_valor") if base_ok else None
     if est_final is not None and est_final > 0:
         if est_inicial is None:
             # REGRA DA PRIMEIRA VEZ (M6): sem período anterior com o dado, o Motor
             # declara a ausência — e diz quando o número aparece — em vez de calcular
             # com o que não tem. Publicada também, porque declarar a ausência É
             # entrega (E6) e porque diz ao lojista o que ele ganha voltando.
-            radar.append(
-                "📦 Giro do estoque: ainda não calculável — o NEXO precisa do valor do "
-                "estoque em duas análises seguidas para medir o que saiu no período. "
-                "A partir da próxima, ele aparece sozinho.")
+            # ⚠️ E o MOTIVO é dito, porque os dois são diferentes para o lojista: um se
+            # resolve voltando no próximo mês; o outro é o produto declarando que NÃO
+            # VAI USAR um número que ele tem — e por quê.
+            #
+            # ⛔ A redação vale para as DUAS pontas. Pode faltar critério no período
+            # anterior (coletado sob a dica antiga) ou no atual (app não atualizado), e
+            # afirmar qual dos dois seria adivinhar.
+            if not base_ok and ant.get("estoque_valor") is not None:
+                radar.append(
+                    "📦 Giro do estoque: ainda não calculável — o NEXO passou a pedir o "
+                    "valor TOTAL do estoque, e antes o campo pedia só o que estava parado. "
+                    "Os dois períodos precisam ter sido informados pelo mesmo critério; "
+                    "misturar daria um número errado. A partir da próxima análise ele "
+                    "aparece sozinho.")
+            else:
+                radar.append(
+                    "📦 Giro do estoque: ainda não calculável — o NEXO precisa do valor do "
+                    "estoque em duas análises seguidas para medir o que saiu no período. "
+                    "A partir da próxima, ele aparece sozinho.")
         elif compra is not None and compra >= 0:
             saida = est_inicial + compra - est_final
             estoque_medio = (est_inicial + est_final) / 2
@@ -1800,26 +1906,70 @@ def validar_entrada(atual, brutos):
 # Variação dos APURADOS. Sem análise anterior não existe "cresceu" nem "caiu": não há
 # de quê. ⚠️ Nominal nos campos que o Motor compara — o lojista pode declarar variação
 # dele ("o fluxo caiu 10%") e isso continua sendo fato dele.
+# ─────────────────────────────────────────────────────────────────────────────
+# 🔴 "NA MESMA FRASE", EM PORTUGUÊS DE VERDADE — e por que TODAS as travas abaixo
+# estavam parcialmente cegas.
+#
+# `[^.]{0,80}` parece dizer "sem sair da frase". Na prática para no PRIMEIRO ponto —
+# e em português o ponto também é separador de milhar. Toda trava escrita assim fica
+# cega justamente nas frases que têm DINHEIRO, que são as que este produto escreve.
+#
+# Medido contra a frase real do relatório da Aromática (14/08):
+#     "o estoque parado de R$ 20.000 também é um dinheiro que já foi gasto e não voltou"
+# A janela morria dentro de "20.000" e o `re.search` devolvia None.
+#
+# ⚠️ É a MESMA classe do `\b` que virou byte 0x08 em 13/08: trava instalada,
+# documentada, com teste passando — e morta na frase que importava. A diferença é que
+# aquela nascia morta e esta morria só quando havia cifra. Pior de encontrar.
+#
+# Aqui o ponto atravessa quando é ponto de número, e só então.
+_MESMA_FRASE = r"(?:[^.]|\.(?=\d))"
+
 _APURADO_VARIA = re.compile(
-    r"\b(faturamento|custos?|lucro|margem|ticket m[ée]dio)\b[^.]{0,60}?"
+    r"\b(faturamento|custos?|lucro|margem|ticket m[ée]dio)\b" + _MESMA_FRASE + r"{0,60}?"
     r"\b(cresceu|caiu|subiu|aumentou|diminuiu|reduziu|melhorou|piorou|"
     r"cresceram|caíram|subiram|aumentaram|diminuíram|reduziram)\b|"
     r"\b(cresceu|caiu|subiu|aumentou|diminuiu|reduziu|"
-    r"cresceram|caíram|subiram|aumentaram|diminuíram)\b[^.]{0,40}?"
+    r"cresceram|caíram|subiram|aumentaram|diminuíram)\b" + _MESMA_FRASE + r"{0,40}?"
     r"\b(faturamento|custos?|lucro|margem|ticket m[ée]dio)\b", re.I)
 
 # Impacto CONSUMADO atribuído à falta. Ruptura autoriza RISCO, nunca efeito medido.
 _FALTA_IMPACTO = re.compile(
-    r"\b(falta|faltou|ruptura|em falta)\b[^.]{0,80}?"
+    r"\b(falta|faltou|ruptura|em falta)\b" + _MESMA_FRASE + r"{0,80}?"
     r"\b(impact\w+|reduz\w+|derrub\w+|prejudic\w+|diminu\w+|fez perder|"
     r"custou|comeu|tirou)\b", re.I)
 
 # Juízo sobre a QUALIDADE da compra. Nenhum campo mede se a compra foi acertada.
+# 🔴 ESTOQUE VIRANDO PERDA — o que o prompt ensinava até 14/08 e o modelo repetiu
+# VERBATIM: "o estoque parado de R$ 20.000 também é um dinheiro que já foi gasto e não
+# voltou". ⛔ Exige a vizinhança das duas ideias na MESMA frase, e deixa passar a perda
+# que é real (validade, avaria, furto) — que é justamente o contraste que o produto
+# precisa saber fazer.
+_ESTOQUE_COMO_PERDA = re.compile(
+    r"\b(estoque|mercadoria parada|encalhe|encalhad\w+)\b" + _MESMA_FRASE + r"{0,90}?"
+    r"(dinheiro (que )?(j[áa] )?(foi )?(gasto|perdido)" + _MESMA_FRASE + r"{0,20}(n[ãa]o volt\w+|sumiu)|"
+    r"\bperd(a|as|ido|idos|eu)\b|preju[íi]zo|dinheiro jogado)|"
+    r"(dinheiro (que )?(j[áa] )?foi gasto" + _MESMA_FRASE + r"{0,20}n[ãa]o volt\w+)" + _MESMA_FRASE + r"{0,60}?\b(estoque|mercadoria)\b",
+    re.I)
+# ⛔ E o percentual de composição virando causa de perda: "a compra de mercadoria, que
+# representou 75% dos custos" sob o título "o que está te fazendo perder dinheiro".
+_COMPOSICAO_COMO_PERDA = re.compile(
+    r"\b(compra|aquisi[çc][ãa]o)\b" + _MESMA_FRASE + r"{0,60}?\b\d[\d.,]*\s*%" + _MESMA_FRASE + r"{0,30}?\b(dos )?custos?\b|"
+    r"\b(representou|representa|corresponde\w*|equivale\w*)\b" + _MESMA_FRASE + r"{0,20}?\d[\d.,]*\s*%"
+    r"" + _MESMA_FRASE + r"{0,30}?\bcustos?\b", re.I)
+
+# ⚠️ E A NEGAÇÃO ANALÍTICA CONTA IGUAL. O léxico cobria `desnecessárias` e deixava
+# passar "que NÃO SÃO MAIS NECESSÁRIAS" — mesmo juízo, negação solta em vez de
+# prefixada. Medido contra a frase real do relatório da Aromática (14/08): "Revisar a
+# estratégia de compras para evitar aquisição de mercadorias que não são mais
+# necessárias" — o `re.search` devolvia None. Uma trava que só pega uma das duas
+# formas do português não é uma trava.
 _COMPRA_JULGADA = re.compile(
-    r"\b(compra|aquisi[çc][ãa]o|investimento em estoque)\b[^.]{0,80}?"
+    r"\b(compra|compras|aquisi[çc][ãa]o|mercadorias?|investimento em estoque)\b" + _MESMA_FRASE + r"{0,80}?"
     r"\b(efica[zc]|ineficaz|ineficiente|acertad\w+|errad\w+|equivocad\w+|"
-    r"mal (feita|dimensionada)|desnecess[áa]ri\w+|excessiv\w+)\b|"
-    r"\b(efica[zc]|ineficaz|ineficiente)\b[^.]{0,60}?\b(compra|estoque)\b", re.I)
+    r"mal (feita|dimensionada)|desnecess[áa]ri\w+|excessiv\w+|"
+    r"n[ãa]o (s[ãa]o|era\w*|foram|s[ãa]o mais|eram mais)? ?(mais )?necess[áa]ri\w+)\b|"
+    r"\b(efica[zc]|ineficaz|ineficiente)\b" + _MESMA_FRASE + r"{0,60}?\b(compra|estoque)\b", re.I)
 
 # Intensidade que ninguém apurou. ⚠️ ESTREIA OBSERVANDO — aqui há julgamento de grau,
 # e a convenção do `_viol` vale: mede-se a taxa antes de promover.
@@ -1835,7 +1985,7 @@ _JULGA_MARGEM = re.compile(
     r"margem\s+(saud[áa]vel|apertada|boa|ruim|alta|baixa|confort[áa]vel|positiva|"
     r"negativa|forte|fraca|excelente|[óo]tima)", re.I)
 _JULGA_LUCRO = re.compile(
-    r"lucro[^.]{0,40}\b(significativ|positiv|expressiv|s[óo]lid|saud[áa]vel|"
+    r"lucro" + _MESMA_FRASE + r"{0,40}\b(significativ|positiv|expressiv|s[óo]lid|saud[áa]vel|"
     r"confort[áa]vel|excelente|[óo]tim|bom\b|boa\b|ruim\b|baix|fraco|alto)", re.I)
 
 
@@ -1844,7 +1994,7 @@ _JULGA_LUCRO = re.compile(
 # ⚠️ `margem` fora: ela tem rótulo próprio publicado pelo Motor, e o prompt manda usar.
 _INDICADOR_JULGADO = re.compile(
     r"\b(giro|ticket m[ée]dio|convers[ãa]o|capacidade|cobertura|meses de venda)\b"
-    r"[^.]{0,90}?\b(inadequad\w+|adequad\w+|ruim|p[ée]ssim\w+|bom\b|boa\b|"
+    r"" + _MESMA_FRASE + r"{0,90}?\b(inadequad\w+|adequad\w+|ruim|p[ée]ssim\w+|bom\b|boa\b|"
     r"saud[áa]vel|preocupante|ideal|excelente|[óo]tim\w+|insuficiente|baix\w+|alt\w+|"
     r"mal (gerenciad|administrad|dimensionad)\w*|gerenciad\w+ de forma)\b", re.I)
 
@@ -1931,6 +2081,33 @@ def validar_saida(saida, dados, indicadores, radar):
                                    f"'{alvo}' foi declarado como item PARADO/baixa saída; "
                                    f"dizer que ele pode faltar ou precisa de reposição "
                                    f"inverte a decisão", linha))
+
+    # 0i · 🟡 FATO REQUALIFICADO EM PERDA — a retaguarda das duas correções de 14/08.
+    #
+    # A causa primária das duas era o PRÓPRIO PRODUTO, e foi consertada onde nasceu: a
+    # frase "dinheiro que já foi gasto e não voltou" saiu do bloco de estoque, e a
+    # proibição de tratar composição como sangria entrou. Isto aqui é o que sobra
+    # depois — o modelo chegando ao mesmo lugar por conta própria.
+    #
+    # ⚠️ ESTREIA OBSERVANDO, as duas. A convenção do `_viol` vale integralmente: a
+    # exceção do #099 não alcança nenhuma delas, porque aqui não há fato que o NEXO
+    # já tenha invalidado — há uma qualificação econômica discutível, e "a compra subiu
+    # 40% enquanto a venda subiu 5%" é evidência LEGÍTIMA de excesso que não pode ser
+    # bloqueada por parecer com o que não é. Mede-se a taxa antes de promover.
+    _suspeitas = (_secao_da_saida(saida, "PERDER DINHEIRO")
+                  + _secao_da_saida(saida, "ALERTAS")
+                  + _secao_da_saida(saida, "DECISÃO MAIS IMPORTANTE"))
+    for linha in _suspeitas:
+        if _ESTOQUE_COMO_PERDA.search(linha):
+            v.append(_viol("estoque tratado como perda realizada",
+                           "mercadoria parada é capital IMOBILIZADO — o dinheiro volta "
+                           "quando ela vender. Perda é o que venceu, estragou ou foi "
+                           "devolvido sem retorno", linha, observa=True))
+        if _COMPOSICAO_COMO_PERDA.search(linha):
+            v.append(_viol("composição de custo tratada como perda",
+                           "percentual de composição diz PARA ONDE o dinheiro foi, não "
+                           "que foi mal gasto — compra ser a maior fatia é o normal do "
+                           "comércio", linha, observa=True))
 
     # 0c · 🔴 VARIAÇÃO SEM PERÍODO ANTERIOR — conclusão sem origem, sem cifra.
     #
@@ -2037,7 +2214,7 @@ def validar_saida(saida, dados, indicadores, radar):
         # 'de X para Y' e também 'manter em X ou mais', que é meta de defesa legítima
         # e traz o ponto de partida escrito. Falso positivo medido em 04/08.
         tem_partida = (re.search(r"\bde\s+R?\$?\s*[\d.,]+\s*%?\s+para\s+R?\$?\s*[\d.,]+", linha, re.I)
-                       or re.search(r"\bmanter\b[^.]{0,40}?R?\$?\s*[\d.,]+\s*%?", linha, re.I))
+                       or re.search(r"\bmanter\b" + _MESMA_FRASE + r"{0,40}?R?\$?\s*[\d.,]+\s*%?", linha, re.I))
         if not tem_partida:
             v.append(_viol("meta sem ponto de partida",
                            "toda meta escreve o valor atual: 'de [atual] para [alvo]' "
@@ -2267,12 +2444,33 @@ def gerar_analise(dados, segmento, modelo=None):
         "perda por validade ou defeito. Se o cliente informou ONDE está a melhor e a pior "
         "margem, use as palavras dele para dizer o que está drenando — e continua PROIBIDO "
         "afirmar qual é a margem de um item que ele só nomeou.\n"
-        "• O QUE ESTÁ PARADO — dinheiro que já foi gasto e não voltou: estoque encalhado, "
-        "crédito com fornecedor, devolução pendente. Diga o valor SÓ quando ele estiver nos dados.\n"
+        # 🔴 A FRASE SAIU EM 14/08, e ela era do PRODUTO, não do modelo. O relatório da
+        # Aromática publicou "o estoque parado de R$ 20.000 também é um dinheiro que já
+        # foi gasto e não voltou" — VERBATIM daqui. Fiscal nenhum pegaria: o modelo
+        # estava obedecendo.
+        #
+        # ⛔ E ela é FALSA para estoque. Mercadoria parada é capital IMOBILIZADO — o
+        # dinheiro está lá e volta quando ela vender. O que não volta é o que venceu ou
+        # estragou, e para isso existe campo próprio. A mesma sentença é verdadeira na
+        # dica de validade do app (`nexo_analise.py`), e foi de lá que ela veio parar
+        # aqui, aplicada ao lugar errado.
+        "• O QUE ESTÁ PARADO — capital imobilizado: dinheiro que já saiu e só volta quando a "
+        "mercadoria vender. Estoque encalhado, crédito com fornecedor, devolução pendente. "
+        "NÃO é perda: perda é o que venceu, estragou ou foi devolvido sem retorno. Diga o "
+        "valor SÓ quando ele estiver nos dados.\n"
         "• O QUE ESTÁ ESBARRANDO — cliente que já está chegando e não fecha: fricção declarada, "
         "demora de resposta, reclamação, horário sem atendimento.\n"
         "Se algum desses não tiver base nos dados, simplesmente não escreva a linha. "
-        "Não invente para preencher, e não repita aqui o que a seção de decisão vai dizer."
+        "Não invente para preencher, e não repita aqui o que a seção de decisão vai dizer.\n"
+        # 🔴 O TÍTULO DA SEÇÃO NÃO É EVIDÊNCIA. Posto sob "o que está te fazendo perder
+        # dinheiro", todo número vira sangria — foi assim que "a compra de mercadoria
+        # representou 75% dos custos" virou causa de perda no relatório da Aromática.
+        # 75% é COMPOSIÇÃO: diz para onde o dinheiro foi, não que foi mal gasto.
+        "⛔ COMPOSIÇÃO NÃO É PERDA. Que a compra de mercadoria seja a maior fatia do custo é "
+        "o NORMAL do comércio — é assim que a loja tem o que vender. Só escreva a compra "
+        "nesta seção se houver EVIDÊNCIA de excesso nos dados: comprou mais do que vendeu no "
+        "período, estoque subindo ciclo após ciclo, ou o próprio lojista declarando sobra. "
+        "Percentual de composição, sozinho, NUNCA sustenta essa linha."
     ); num += 1
     secoes.append(
         f"🚨 {num}. ALERTAS\n"
@@ -2315,7 +2513,19 @@ def gerar_analise(dados, segmento, modelo=None):
         "trate-a como conserto barato e concreto, não como observação. "
         "Ao final de CADA ação, acrescente uma tag curta entre parênteses com o custo e o prazo de resultado, "
         "neste formato exato: (Custo: zero | Resultado em: ~7 dias). "
-        "Use valores realistas em reais (ou 'zero') e prazos aproximados. Não use notas, pontuações ou percentuais de prioridade."
+        "Use valores realistas em reais (ou 'zero') e prazos aproximados. Não use notas, pontuações ou percentuais de prioridade.\n"
+        # 🔴 A AÇÃO NÃO PODE EMPOBRECER O QUE O FORMULÁRIO CONQUISTOU. Relatório da
+        # Aromática (14/08): o lojista declarou item=Perfume, valor=R$ 250 e prazo=30
+        # dias — e a ação saiu "verificar a validade dos perfumes". O produto pediu que
+        # ele conferisse o que ele acabou de informar.
+        #
+        # ⛔ NUNCA mandar VERIFICAR, LEVANTAR, CHECAR ou MAPEAR um dado que já está nos
+        # dados. Se o cliente informou item, valor e prazo, a ação AGE sobre eles.
+        "⛔ NÃO peça ao lojista para VERIFICAR, CONFERIR, LEVANTAR ou MAPEAR aquilo que ele "
+        "JÁ INFORMOU. Se um campo traz o item, o valor e o prazo, a ação usa os TRÊS e diz o "
+        "que FAZER com eles. Errado: 'verificar a validade dos perfumes'. Certo: 'priorizar o "
+        "Perfume com R$ 250 em risco de validade nos próximos 30 dias e definir a ação de giro "
+        "antes desse prazo'. Ação que devolve a pergunta ao cliente não é ação."
     ); num += 1
     secoes.append(
         f"🧭 {num}. METAS ATÉ A PRÓXIMA ANÁLISE\n"
@@ -2364,17 +2574,33 @@ def gerar_analise(dados, segmento, modelo=None):
     # Certeza usa, dúvida cala. A instrução abaixo é o pedido; a garantia é a
     # checagem 7 do validador, porque instrução de prompt sobre número já provou
     # não bastar (o PDF de agosto saiu com 16,8% tendo "reproduza exatamente" escrito).
+    # 🔴 E O RÓTULO SEGUE A NATUREZA DECLARADA. Enquanto este bloco entregava o número
+    # como "ESTOQUE PARADO", o modelo obedecia — e o relatório da Aromática (14/08)
+    # chamou de parado o estoque inteiro do lojista, em quatro lugares, com a decisão
+    # mais importante da análise construída em cima disso.
     valor_estoque, motivo_estoque = _valor_estoque(dados)
+    total = _base_estoque(_bloco_atual(dados))
+    rotulo = "VALOR TOTAL DO ESTOQUE" if total else "VALOR DO ESTOQUE INFORMADO"
+    como_falar = ("o valor total do estoque" if total else
+                  "o valor do estoque que o cliente informou")
     if valor_estoque is not None:
-        bloco_motor += (f"ESTOQUE PARADO — VALOR LIDO DO QUE O CLIENTE ESCREVEU: "
+        bloco_motor += (f"{rotulo} — LIDO DO QUE O CLIENTE ESCREVEU: "
                         f"R$ {_fmt_br(valor_estoque)}.\n"
-                        f"Use EXATAMENTE este valor ao falar do estoque parado. É PROIBIDO "
-                        f"escrever qualquer outro valor em reais para o estoque.\n\n")
+                        f"Use EXATAMENTE este valor ao falar do estoque. É PROIBIDO "
+                        f"escrever qualquer outro valor em reais para o estoque.\n")
+        if total:
+            # ⛔ A distinção que faltava: total ≠ encalhado. Sem esta linha o modelo
+            # tratava o estoque inteiro como mercadoria parada — que é o que ele fez.
+            bloco_motor += ("Este é o estoque TOTAL, não o encalhado: é PROIBIDO chamá-lo de "
+                            "'estoque parado', 'encalhado' ou 'sem giro'. O que está parado, "
+                            "se existir, está descrito nos campos próprios — e não tem este "
+                            "valor.\n")
+        bloco_motor += "\n"
     else:
-        bloco_motor += (f"ESTOQUE PARADO — VALOR NÃO DETERMINADO ({motivo_estoque}).\n"
+        bloco_motor += (f"{rotulo} — NÃO DETERMINADO ({motivo_estoque}).\n"
                         f"É PROIBIDO afirmar, estimar ou arredondar QUALQUER valor em reais para o "
-                        f"estoque parado — inclusive 'cerca de', 'aproximadamente' ou 'em torno de'.\n"
-                        f"Se precisar mencionar o estoque parado com valor, escreva exatamente: "
+                        f"estoque — inclusive 'cerca de', 'aproximadamente' ou 'em torno de'.\n"
+                        f"Se precisar mencionar {como_falar} com cifra, escreva exatamente: "
                         f"\"{FRASE_ESTOQUE_SEM_VALOR}\"\n"
                         f"A decisão e as ações continuam valendo sem a cifra — o estoque perde o "
                         f"tamanho, não o rumo.\n\n")
@@ -2598,7 +2824,7 @@ def gerar_analise(dados, segmento, modelo=None):
 
                 f"REGRA FINAL DE QUALIDADE: se a resposta não terminar com uma decisão clara e executável, a resposta é inválida.\n\n"
                 f"{bloco_motor}"
-                f"DADOS DO NEGÓCIO:\n{dados}"
+                f"DADOS DO NEGÓCIO:\n{_dados_legiveis(dados)}"
     )
 
     def _pedir(mensagens):
