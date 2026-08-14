@@ -2014,6 +2014,59 @@ _FALTA_IMPACTO = re.compile(
     r"custou|comeu|tirou)\b", re.I)
 
 # Juízo sobre a QUALIDADE da compra. Nenhum campo mede se a compra foi acertada.
+# ─────────────────────────────────────────────────────────────────────────────
+# 🔑 O MOTOR CONCEDE O DIREITO DE CONCLUIR — o detector só reconhece a conclusão.
+#
+# Veredito do fundador, 14/08, depois da Rodada 2 provar os dois lados:
+#
+#   · bloqueio LEXICAL puro é errado — "a compra foi excessiva" pode ser VERDADE
+#     quando existe evidência, e travar a palavra calaria o produto;
+#   · `observa=True` é errado também — deixou frases economicamente falsas chegarem
+#     ao relatório real.
+#
+# ⚖️ A saída não é escolher entre os dois: é BLOQUEIO CONDICIONADO À AUTORIZAÇÃO.
+#     *"O modelo não ganha direito de concluir porque encontrou palavras plausíveis;
+#      o Motor concede o direito de concluir porque existe evidência."*
+#
+# E o autorizador não é régua nova: é O QUE O MOTOR JÁ PUBLICOU nesta análise.
+
+def _excesso_de_compra_declarado(radar, indicadores):
+    """O Motor declarou que se comprou ACIMA do que se vendeu?
+
+    Duas formas, ambas já existentes: a relação `compra × saída` (que só nasce quando
+    a identidade do giro fecha) e o estoque subindo entre períodos — que, por
+    construção, só é publicado quando as duas pontas têm natureza declarada.
+
+    ⛔ Composição NÃO entra: 64% dos custos serem compra é o normal do comércio."""
+    for l in radar or ():
+        if "Compra × saída" in l and "acima do que vendeu" in l:
+            return True
+    for l in indicadores or ():
+        if l.startswith("Valor do estoque:") and "(+" in l:
+            return True
+    return False
+
+
+# "Nenhuma", "não houve", "-", "0": campo preenchido para dizer que NÃO houve. Tratar
+# isso como evento seria pior que não ter o campo.
+_NEGATIVO = re.compile(r"^\s*(n[ãa]o|nenhum\w*|nada|sem\b|n/?a|-+|0)\s*[.!]?\s*$", re.I)
+
+def _evento_de_perda_declarado(dados):
+    """Existe PERDA REALIZADA declarada — o que de fato não volta?
+
+    Validade vencendo, troca por defeito, avaria. É o contraste que o produto precisa
+    saber fazer: mercadoria parada é capital imobilizado e volta quando vender;
+    mercadoria vencida não volta."""
+    at = _bloco_atual(dados)
+    if _texto_do_campo(at, "validade_risco").strip().lower().startswith("sim"):
+        return True
+    for chave in ("perdas_validade", "trocas"):
+        t = _texto_do_campo(at, chave).strip()
+        if t and not _NEGATIVO.match(t):
+            return True
+    return False
+
+
 # Variação de estoque ENTRE PERÍODOS: "de R$ 20.000 para R$ 24.000", "subiu 20%",
 # "aumentou R$ 4.000". ⚠️ Só o que compara duas pontas — dizer o valor de hoje ("o
 # estoque é de R$ 24.000") continua livre, porque esse número é do período atual e tem
@@ -2204,17 +2257,23 @@ def validar_saida(saida, dados, indicadores, radar):
     _suspeitas = (_secao_da_saida(saida, "PERDER DINHEIRO")
                   + _secao_da_saida(saida, "ALERTAS")
                   + _secao_da_saida(saida, "DECISÃO MAIS IMPORTANTE"))
+    # 🔑 E O GATE É A AUTORIZAÇÃO DO MOTOR, não a palavra. Havendo evento de perda
+    # declarado, "perda" está autorizada e a frase passa; havendo excesso de compra
+    # declarado, o juízo sobre a compra passa. Sem eles, BLOQUEIA — porque aí não é
+    # uma frase discutível, é uma conclusão sem nada que a sustente.
+    perda_ok = _evento_de_perda_declarado(dados)
+    compra_ok = _excesso_de_compra_declarado(radar, indicadores)
     for linha in _suspeitas:
-        if _ESTOQUE_COMO_PERDA.search(linha):
-            v.append(_viol("estoque tratado como perda realizada",
-                           "mercadoria parada é capital IMOBILIZADO — o dinheiro volta "
-                           "quando ela vender. Perda é o que venceu, estragou ou foi "
-                           "devolvido sem retorno", linha, observa=True))
-        if _COMPOSICAO_COMO_PERDA.search(linha):
+        if not perda_ok and _ESTOQUE_COMO_PERDA.search(linha):
+            v.append(_viol("estoque tratado como perda sem evento de perda",
+                           "mercadoria parada é capital IMOBILIZADO — volta quando ela "
+                           "vender. Perda é o que venceu, estragou ou foi devolvido sem "
+                           "retorno, e nada disso foi declarado nesta análise", linha))
+        if not compra_ok and _COMPOSICAO_COMO_PERDA.search(linha):
             v.append(_viol("composição de custo tratada como perda",
                            "percentual de composição diz PARA ONDE o dinheiro foi, não "
-                           "que foi mal gasto — compra ser a maior fatia é o normal do "
-                           "comércio", linha, observa=True))
+                           "que foi mal gasto — e o Motor não apurou compra acima da "
+                           "saída nem estoque subindo que sustentem a conclusão", linha))
 
     # 0c · 🔴 VARIAÇÃO SEM PERÍODO ANTERIOR — conclusão sem origem, sem cifra.
     #
@@ -2249,13 +2308,19 @@ def validar_saida(saida, dados, indicadores, radar):
     # *"a compra de R$ 38.000 indica que o investimento em estoque pode não ter sido
     # totalmente eficaz"* — compra ser 84,4% dos custos é COMPOSIÇÃO, não veredito.
     # Nenhum campo do formulário mede se a compra foi acertada.
-    for linha in (saida or "").split("\n"):
-        if linha.strip() in {l.strip() for l in (radar or [])}:
-            continue
-        if _COMPRA_JULGADA.search(linha):
-            v.append(_viol("juízo sobre a compra sem dado que o sustente",
-                           "a composição do custo diz QUANTO foi comprado, não se a "
-                           "compra foi acertada — nenhum campo mede isso", linha))
+    # 🔑 MESMO GATE DA 0i: o juízo sobre a compra passa a ser permitido QUANDO o Motor
+    # apurou excesso — comprou acima do que vendeu, ou o estoque subiu entre períodos
+    # comparáveis. Antes de 14/08 esta trava era cega nos dois sentidos: bloqueava a
+    # conclusão verdadeira e não tinha como distinguir.
+    if not _excesso_de_compra_declarado(radar, indicadores):
+        for linha in (saida or "").split("\n"):
+            if linha.strip() in {l.strip() for l in (radar or [])}:
+                continue
+            if _COMPRA_JULGADA.search(linha):
+                v.append(_viol("juízo sobre a compra sem dado que o sustente",
+                               "a composição do custo diz QUANTO foi comprado, não se a "
+                               "compra foi acertada — e o Motor não apurou compra acima "
+                               "da saída nem estoque subindo nesta análise", linha))
 
     # 0f · 🟡 INTENSIDADE NÃO APURADA — *"impactaram SIGNIFICATIVAMENTE o lucro"*.
     # ⚠️ ESTREIA OBSERVANDO, e de propósito: aqui há julgamento de grau, e a convenção
@@ -2468,6 +2533,30 @@ def _texto_das_violacoes(violacoes):
     linhas = [f"- {x['regra'].upper()}: {x['detalhe']}" +
               (f"  (na linha: «{x['trecho']}»)" if x["trecho"] else "") for x in violacoes]
     return "\n".join(linhas)
+
+def _fallback_apurado(bruto, dados, indicadores, radar, segmento):
+    """FALLBACK CONTROLADO — e ele NÃO joga fora o que o código garantiu.
+
+    O Radar, o §2 e as Metas são escritos por CÓDIGO e estão certos
+    independentemente do que o modelo fez: quem falhou foi a interpretação, não a
+    apuração. Medido em produção 05/08 12:43 — uma rodada caiu aqui e o cliente
+    recebeu UMA FRASE no lugar da análise, com o Motor tendo calculado tudo.
+
+    ⚠️ `bruto` pode ser "" — é o caso em que a retentativa nem chegou a existir
+    (exceção). Aí só há as seções apuradas, que é exatamente o que se quer."""
+    secoes = _em_secoes(bruto)
+    _garantir_secao(secoes, "RADAR", "RADAR DO NEGÓCIO", list(radar))
+    _garantir_secao(secoes, "CICLO", "O CICLO ANTERIOR", _bloco_ciclo(dados, indicadores))
+    _garantir_secao(secoes, "METAS", "METAS ATÉ A PRÓXIMA ANÁLISE", _bloco_metas(dados))
+    apuradas = [s for s in secoes if s["origem"] == "codigo"]
+    if not apuradas:
+        return FALLBACK_SEGURO, []
+    apuradas.append({"n": None, "titulo": None, "origem": "codigo", "linhas": [
+        _linha_estruturada("Os números acima foram apurados e conferidos. A leitura e as "
+                           "recomendações desta análise não puderam ser produzidas com "
+                           "segurança desta vez — rode a análise novamente.")]})
+    print(f"PUBLICACAO|{segmento}|fallback-parcial|secoes-apuradas={len(apuradas) - 1}")
+    return _texto_de_secoes(apuradas), apuradas
 
 def gerar_analise(dados, segmento, modelo=None):
     modos = {
@@ -2991,49 +3080,40 @@ def gerar_analise(dados, segmento, modelo=None):
         "estava certo e obedecendo às mesmas regras do pedido original. Não comente a correção: "
         "devolva só a análise."
     )
-    # A correção é uma TENTATIVA DE MELHORA. Se ela falhar por qualquer motivo —
-    # limite de taxa, timeout, indisponibilidade — vale a análise da 1ª tentativa,
-    # que é real e completa. Deixar a exceção subir entregava erro genérico ao
-    # cliente e jogava fora uma análise que existia.
+    # 🔴 FALHA DE CORREÇÃO NUNCA REABILITA UMA SAÍDA JÁ REPROVADA.
+    #
+    # Este `except` devolvia `texto1` — a 1ª tentativa, com a violação intacta. A razão
+    # escrita era "vale a análise da 1ª tentativa, que é real e completa", e ela parecia
+    # generosa: melhor entregar algo do que nada.
+    #
+    # ⛔ MEDIDO NA RODADA 2 DA AROMÁTICA (14/08). O relatório chegou ao lojista com
+    # "evitar aquisição de mercadorias que não são mais necessárias" — exatamente a
+    # frase que o `_COMPRA_JULGADA` bloqueia. A trava disparou, a retentativa levantou
+    # exceção, e o caminho de cima republicou a saída reprovada.
+    #
+    # ⚖️ Isso anula o significado de trava bloqueante: com pressão de cota, TODA
+    # checagem ativa degradava silenciosamente para consultiva. Depois que o NEXO sabe
+    # que a 1ª saída viola uma regra bloqueante, ela não pode voltar a ser candidata —
+    # não importa se foi timeout, erro do modelo ou exceção interna.
+    #
+    # O que sobra é o fallback, que NÃO é entregar nada: o Radar, o §2 e as Metas são
+    # escritos por código e continuam certos. Quem falhou foi a interpretação.
     try:
         saida2 = _pedir([{"role": "user", "content": prompt},
                          {"role": "assistant", "content": saida},
                          {"role": "user", "content": correcao}])
     except Exception as e:
         print(f"VALIDADOR|correcao-falhou|{segmento}|{type(e).__name__}|{e}")
-        return texto1, secoes1
+        _registrar("fallback-sem-correcao", segmento, ativas, f"modo={MODO_VALIDADOR}")
+        return _fallback_apurado("", dados, indicadores, radar, segmento)
     texto2, secoes2 = _entregar(saida2)
     violacoes2 = validar_saida(texto2, dados, indicadores, radar)
     _registrar("saida-2a-tentativa", segmento, violacoes2, f"modo={MODO_VALIDADOR}")
     if not [x for x in violacoes2 if not x.get("observa")]:
         return texto2, secoes2
 
-    # FALLBACK CONTROLADO — não se mutila o PDF removendo linhas: uma análise sem
-    # decisão, sem meta ou sem ação fica semanticamente quebrada. Devolve-se um
-    # estado declarado, que preserva a promessa do produto.
     _registrar("fallback", segmento, violacoes2, f"modo={MODO_VALIDADOR}")
-
-    # FALLBACK — e ele NÃO joga mais fora o que o código garantiu.
-    # A razão antiga ("não se mutila o PDF removendo linhas") valia quando a análise
-    # inteira era prosa do modelo: tirar uma parte deixava o resto sem sentido. Agora
-    # o Radar e as Metas são escritos por CÓDIGO e estão certos independentemente do
-    # que o modelo fez — quem falhou foi a interpretação, não a apuração.
-    # 🔴 Medido em produção, 05/08 12:43: uma rodada caiu aqui e o cliente recebeu
-    # UMA FRASE no lugar da análise, com o Motor tendo calculado tudo direito.
-    # Melhor entregar o que se garante e declarar o que faltou, do que entregar nada.
-    secoes = _em_secoes(saida2)
-    _garantir_secao(secoes, "RADAR", "RADAR DO NEGÓCIO", list(radar))
-    _garantir_secao(secoes, "CICLO", "O CICLO ANTERIOR", _bloco_ciclo(dados, indicadores))
-    _garantir_secao(secoes, "METAS", "METAS ATÉ A PRÓXIMA ANÁLISE", _bloco_metas(dados))
-    apuradas = [s for s in secoes if s["origem"] == "codigo"]
-    if not apuradas:
-        return FALLBACK_SEGURO, []
-    apuradas.append({"n": None, "titulo": None, "origem": "codigo", "linhas": [
-        _linha_estruturada("Os números acima foram apurados e conferidos. A leitura e as "
-                           "recomendações desta análise não puderam ser produzidas com "
-                           "segurança desta vez — rode a análise novamente.")]})
-    print(f"PUBLICACAO|{segmento}|fallback-parcial|secoes-apuradas={len(apuradas) - 1}")
-    return _texto_de_secoes(apuradas), apuradas
+    return _fallback_apurado(saida2, dados, indicadores, radar, segmento)
 
 def _observar_em_shadow(segmento, brutos, analise):
     """🔭 O mecanismo decisório novo observa a análise real e REGISTRA. Só isso.

@@ -303,5 +303,96 @@ vs = S.validar_saida("4. O QUE ESTÁ TE FAZENDO PERDER DINHEIRO\nO estoque subiu
 caso("comparação legítima não é bloqueada",
      any(x["regra"] == "variação de estoque entre naturezas incompatíveis" for x in vs), False)
 
+
+print("\n=== 🔑 O MOTOR CONCEDE O DIREITO DE CONCLUIR (14/08, veredito pós-Rodada 2) ===")
+# ⚖️ A Rodada 2 provou os DOIS lados do problema:
+#   · bloqueio LEXICAL puro é errado — "a compra foi excessiva" pode ser VERDADE
+#     quando existe evidência, e travar a palavra calaria o produto;
+#   · `observa=True` é errado também — deixou quatro frases economicamente falsas
+#     chegarem ao relatório real do lojista.
+#
+# A saída não é escolher entre os dois: é BLOQUEIO CONDICIONADO À AUTORIZAÇÃO.
+# E o autorizador não é régua nova — é O QUE O MOTOR JÁ PUBLICOU nesta análise.
+
+def cenario(validade=False, trocas="", compra=None, est_ant=None, est_at=None, base=True):
+    ant = "faturamento: 50.000\ncustos: 40.000\nlucro: 10.000\n"
+    if est_ant is not None: ant += f"estoque_valor: {est_ant}\n"
+    if base and est_ant is not None: ant += "estoque_base: total\n"
+    at = "faturamento: 58.000\ncustos: 50.000\nlucro: 8.000\n"
+    if est_at is not None: at += f"estoque_valor: {est_at}\n"
+    if base and est_at is not None: at += "estoque_base: total\n"
+    if compra is not None: at += f"compra_mercadoria: {compra}\n"
+    at += "validade_risco: Sim\nvalidade_item: Perfume\nvalidade_valor: 250,00\n" if validade else ""
+    if trocas: at += f"trocas: {trocas}\n"
+    return ("=== ANÁLISE ANTERIOR 1 (período: Julho 2026) ===\nDADOS DAQUELA ANÁLISE:\n" + ant +
+            "DECISÕES RECOMENDADAS NAQUELA ANÁLISE:\nnada\n=== DADOS ATUAIS ===\n" + at)
+
+def regras(d, txt):
+    ind, rad = S.calcular_motor(d)
+    vs = S.validar_saida("4. O QUE ESTÁ TE FAZENDO PERDER DINHEIRO\n" + txt + "\n", d, ind, rad)
+    return {x["regra"] for x in vs if not x.get("observa")}
+
+PERDA = "O estoque parado de R$ 24.000 é um dinheiro que já foi gasto e não voltou."
+COMPRA = "A compra de mercadoria representou 64% dos custos, drenando o caixa."
+JUIZO = "Revisar a estratégia de compras para evitar aquisição de mercadorias que não são mais necessárias."
+
+print("  — SEM autorização: as três BLOQUEIAM (é o caso exato da Rodada 2) —")
+d0 = cenario(est_ant=20000, est_at=24000, base=False, compra=32000)
+caso("estoque como perda, sem evento de perda",
+     "estoque tratado como perda sem evento de perda" in regras(d0, PERDA), True)
+caso("composição como perda, sem excesso apurado",
+     "composição de custo tratada como perda" in regras(d0, COMPRA), True)
+caso("juízo sobre a compra, sem excesso apurado",
+     "juízo sobre a compra sem dado que o sustente" in regras(d0, JUIZO), True)
+
+print("\n  — 🔑 COM evento de perda declarado, 'perda' passa a ser AUTORIZADA —")
+# Validade vencendo é perda que de fato não volta — o contraste que o produto precisa
+# saber fazer. Mercadoria parada volta quando vender; mercadoria vencida não.
+d1 = cenario(validade=True, est_ant=20000, est_at=24000, base=False)
+caso("com validade em risco, a frase de perda não é bloqueada",
+     "estoque tratado como perda sem evento de perda" in regras(d1, PERDA), False)
+d2 = cenario(trocas="3 frascos com vazamento, fornecedor Aromas SP", est_at=24000, base=False)
+caso("troca por defeito também autoriza",
+     "estoque tratado como perda sem evento de perda" in regras(d2, PERDA), False)
+# ⚠️ Campo preenchido para dizer que NÃO houve não é evento.
+d3 = cenario(trocas="Nenhuma", est_at=24000, base=False)
+caso("⛔ 'Nenhuma' em trocas NÃO autoriza",
+     "estoque tratado como perda sem evento de perda" in regras(d3, PERDA), True)
+
+print("\n  — 🔑 COM excesso de compra apurado pelo Motor, o juízo passa —")
+# saída = 20.000 + 40.000 − 30.000 = 30.000 · compra 40.000 > saída ⇒ comprou ACIMA.
+d4 = cenario(compra=40000, est_ant=20000, est_at=30000)
+ind4, rad4 = S.calcular_motor(d4)
+caso("o Motor publicou a relação compra × saída",
+     any("Compra × saída" in l and "acima do que vendeu" in l for l in rad4), True)
+caso("e com ela o juízo sobre a compra é autorizado",
+     "juízo sobre a compra sem dado que o sustente" in regras(d4, JUIZO), False)
+caso("a composição também deixa de ser bloqueada",
+     "composição de custo tratada como perda" in regras(d4, COMPRA), False)
+
+print("\n  — ⚠️ e composição SOZINHA nunca autoriza (é o normal do comércio) —")
+d5 = cenario(compra=32000, est_ant=24000, est_at=20000, base=True)
+caso("comprou ABAIXO do que vendeu: segue bloqueado",
+     "juízo sobre a compra sem dado que o sustente" in regras(d5, JUIZO), True)
+
+print("\n=== 🔴 FALHA DE CORREÇÃO NUNCA REABILITA UMA SAÍDA JÁ REPROVADA ===")
+# A Rodada 2 chegou ao lojista com a frase que o `_COMPRA_JULGADA` bloqueia: a trava
+# disparou, a retentativa levantou exceção, e o `except` republicou a 1ª tentativa.
+# ⛔ Com pressão de cota, TODA checagem ativa degradava para consultiva.
+d_fb = cenario(est_at=24000, compra=32000)
+ind_fb, rad_fb = S.calcular_motor(d_fb)
+texto, secoes = S._fallback_apurado("", d_fb, ind_fb, rad_fb, "Perfumaria")
+caso("sem retentativa alguma, o fallback ainda entrega o apurado", len(secoes) > 1, True)
+caso("o Radar sobrevive — quem falhou foi a interpretação",
+     any("RADAR" in (s.get("titulo") or "") for s in secoes), True)
+caso("as Metas sobrevivem",
+     any("METAS" in (s.get("titulo") or "") for s in secoes), True)
+caso("e declara ao lojista o que não pôde ser produzido",
+     "não puderam ser produzidas com segurança" in texto, True)
+caso("⛔ e NÃO carrega prosa de modelo nenhuma",
+     "não são mais necessárias" in texto or "já foi gasto" in texto, False)
+caso("toda seção entregue é de origem código",
+     {s["origem"] for s in secoes}, {"codigo"})
+
 print(f"\n{'='*62}\n  {ok} passaram · {falhou} falharam\n{'='*62}")
 sys.exit(1 if falhou else 0)
