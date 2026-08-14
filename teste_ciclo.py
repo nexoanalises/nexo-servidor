@@ -137,5 +137,31 @@ caso("declara que não atribui, de um jeito ou de outro",
 for t in ["Repetir é a aposta", "mudar a abordagem", "resultado não veio"]:
     caso(f"e não escolhe história: {t}", t in b, False)
 
+
+print("\n=== 🔴 O VERBO SEGUE O MOVIMENTO — NOS DOIS LADOS (14/08) ===")
+# A regra estava aplicada só ao lado RUIM: "custo e estoque que pioraram SUBIRAM, não
+# recuaram". O lado BOM herdou o defeito espelhado — custo e estoque que MELHORAM
+# CAEM, e a frase dizia que eles "avançaram".
+#
+# Pego no teste dirigido da Aromática, ANTES de gastar análise real: estoque de
+# R$ 24.000 → R$ 22.000 (melhora) saía como "estoque avançaram".
+#
+# ⚖️ É a lição de 13/08 outra vez: regra boa não tem lado.
+b = S._leitura_mista(["faturamento", "lucro", "estoque_valor"], ["custos"])
+caso("estoque que melhorou CAIU, não avançou", "estoque caiu" in b, True)
+caso("⛔ e não diz que ele avançou", "estoque avançaram" in b, False)
+caso("o que subiu de verdade continua avançando", "faturamento e lucro avançaram" in b, True)
+
+print("\n  — e o verbo concorda com o NÚMERO GRAMATICAL, não com o tamanho da lista —")
+# "custos" e "clientes" são plurais mesmo sozinhos. Saía "enquanto custos subiu".
+caso("custos sozinho leva verbo plural", "custos subiram" in b, True)
+caso("⛔ nunca 'custos subiu'", "custos subiu," in b or b.endswith("custos subiu"), False)
+b2 = S._leitura_mista(["clientes"], ["lucro"])
+caso("clientes sozinho leva verbo plural", "clientes avançaram" in b2, True)
+caso("e o singular continua singular", "lucro recuou" in b2, True)
+b3 = S._leitura_mista(["faturamento"], ["estoque_valor"])
+caso("faturamento sozinho é singular", "faturamento avançou" in b3, True)
+caso("estoque que piorou SUBIU, e no singular", "estoque subiu" in b3, True)
+
 print(f"\n{'='*54}\n  {ok} passaram · {falhou} falharam\n{'='*54}")
 sys.exit(1 if falhou else 0)

@@ -1082,6 +1082,11 @@ _ROTULO_COMPARAVEL = {
 }
 
 
+# Rótulos que são PLURAIS mesmo sozinhos na frase. Sem isto o verbo concordava com o
+# tamanho da lista e saía "enquanto custos subiu".
+_ROTULO_PLURAL = {"custos", "clientes"}
+
+
 def _lista_pt(itens):
     itens = [_ROTULO_COMPARAVEL[k] for k in itens]
     return itens[0] if len(itens) == 1 else ", ".join(itens[:-1]) + " e " + itens[-1]
@@ -1125,15 +1130,36 @@ def _leitura_mista(avancaram, recuaram, chave="sim"):
     ⚠️ E o verbo segue o MOVIMENTO, não a avaliação: custo e estoque que pioraram
     SUBIRAM, não recuaram. Dizer "os custos recuaram" quando eles subiram inverteria
     o fato para poder usar uma palavra só.
+
+    🔴 E ISSO VALE NOS DOIS LADOS — a mesma lição de 13/08, de novo. A regra estava
+    aplicada só ao lado ruim, e o lado bom herdou o defeito espelhado: custo e estoque
+    que MELHORAM caem, e a frase dizia que eles "avançaram". Pego no teste dirigido da
+    Aromática, antes de gastar análise: *"faturamento, lucro e estoque avançaram"* com
+    o estoque indo de R$ 24.000 para R$ 22.000.
+
+    ⚠️ E o verbo também concorda com o NÚMERO GRAMATICAL do rótulo, não com o tamanho
+    da lista. "custos" e "clientes" são plurais mesmo sozinhos — a frase saía "enquanto
+    custos subiu". Mesma família da nota do `PREOCUPACOES`, que já registrava que "os
+    custos subiu" ia sair no Radar.
     """
-    caiu = [k for k in recuaram if _DIRECAO_COMPARAVEL[k] > 0]
-    subiu = [k for k in recuaram if _DIRECAO_COMPARAVEL[k] < 0]
+    def _frase(chaves, verbo_s, verbo_p):
+        if not chaves:
+            return ""
+        plural = len(chaves) > 1 or _ROTULO_COMPARAVEL[chaves[0]] in _ROTULO_PLURAL
+        return f"{_lista_pt(chaves)} {verbo_p if plural else verbo_s}"
+
+    # Lado BOM: o que subiu subiu; o que melhorou caindo, caiu.
+    melhorou = " e ".join(p for p in (
+        _frase([k for k in avancaram if _DIRECAO_COMPARAVEL[k] > 0], "avançou", "avançaram"),
+        _frase([k for k in avancaram if _DIRECAO_COMPARAVEL[k] < 0], "caiu", "caíram"),
+    ) if p)
+    # Lado RUIM: idem, na direção oposta.
     piorou = " e ".join(p for p in (
-        f"{_lista_pt(caiu)} {'recuou' if len(caiu) == 1 else 'recuaram'}" if caiu else "",
-        f"{_lista_pt(subiu)} {'subiu' if len(subiu) == 1 else 'subiram'}" if subiu else "",
+        _frase([k for k in recuaram if _DIRECAO_COMPARAVEL[k] > 0], "recuou", "recuaram"),
+        _frase([k for k in recuaram if _DIRECAO_COMPARAVEL[k] < 0], "subiu", "subiram"),
     ) if p)
     return (f"{_ABERTURA_MISTA[chave]} Os resultados foram MISTOS: "
-            f"{_lista_pt(avancaram)} avançaram, enquanto {piorou}. "
+            f"{melhorou}, enquanto {piorou}. "
             f"{_FECHO_MISTO[chave]}")
 
 
